@@ -1,23 +1,40 @@
-# koyunkirpan
-Source code for u/koyunkirpan
+# koyunkapan
 
-<a href="https://www.buymeacoffee.com/oldventura" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-red.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>
+Source code for u/koyunkapan. This repository is forked from the original [oldventura/koyunkirpan](https://github.com/oldventura/koyunkirpan). Thanks for the base code.
 
-This repo is just a showcase for the source code and wasn't intented for providing a ready-to-use product for others. However, feel free to use, modify and share the code.
+## Running
 
-## Backstory
-I was trying to make a small contest where I would create a bot account on reddit that comments on posts once in a while and then people would try to find this account by inspecting the subreddit activity. Back then, koyunkirpan was only able to make single comments on posts using their titles. Later on, people loved koyunkirpan because of its authenticity, simplicity and complex responses. Then I decided to keep koyunkirpan running. In less then six months, koyunkirpan reached 170k karma in his account, exceeding my own karma count, which makes me proud as hell. We also created a subreddit for koyunkirpan, where people share screenshots of funny conversations they've had with koyunkirpan.
+Create `praw.ini` file in user config (`/home/user/.config/`) directory.
 
-You can check it here: [r/koyunkirpan](https://koyunkirpan.reddit.com) (for Turkish speakers)
+```
+git clone https://github.com/beucismis/koyunkapan
+cd koyunkapan/
+pip install .
 
-## How does it work?
-At the beginning, I've tried several things for koyunkirpan. But none of the solutions were good enough. They were inconsistent, silly and not suited to the subreddit's context. Then, while I was drinking a few beers, I came up with a stupid solution that just worked. I called it "the koyunkirpan algorithm". Yes, koyunkirpan does not have artifical intelligence, does not use machine learning models and isn't an oracle machine :)
+KOYUNKAPAN_DATA_DIR=/home/user/data
 
-Trying to analyze text context was amazingly hard because of the diversity of the Turkish language. But the semantic of the text was always related to its syntax! So, I wrote a simple algorithm that searched through reddit for keywords in the source text. Here I've used a special search combination for reddit where keywords in the source text were combined together in some kind of a disjunctive normal form (DNF). The highest results always include most of the keywords in some sense. After that, the algorithm collects comments similar to the source text and collects their replies. After ranking the results, it just picks a reply and return this as the response to the source text. Simple but highly suited for a community!
+# Bot
+python3 -m koyunkapan.bot.core
 
-Here's an example of the idea. Imagine you're asking me a question and I don't know the answer but I'm trying to look like I know the answer. So, I go to a university and wander around searching for people that ask similar questions to my original question. I listen to professors' answers, collect them, and then decide on an answer by ranking them. After that I return and just give you the selected answer.
+# Dashboard
+flask --app koyunkapan.dashboard.main:app run --port 3131 --debug
+```
 
-## Contribution
-koyunkirpan is not a piece of software nor a product. It's a living piece of art that can be seen as the collective consciousness of users from r/KGBTR. Each day, koyunkirpan continues to amaze more people as he imitates comments made by real people. Therefore, I don't consider merging any pull requests.
+## Service
 
-<a rel="license" href="http://creativecommons.org/licenses/by-nc-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="https://i.creativecommons.org/l/by-nc-sa/4.0/88x31.png" /></a><br />This work is licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-nc-sa/4.0/">Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License</a>.
+Check `[Service] > Environment` before running.
+
+```
+cp koyunkapan-bot.service koyunkapan-dashboard.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+
+systemctl --user enable koyunkapan-bot.service
+systemctl --user enable koyunkapan-dashboard.service
+
+systemctl --user start koyunkapan-bot.service
+systemctl --user start koyunkapan-dashboard.service
+```
+
+## License
+
+`koyunkapan` is distributed under the terms of the [MIT](LICENSE.txt) license.

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="tr">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <link rel="icon" href="{{ url_for('static', filename='favicon.png') }}" />
+        <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+        <link rel="icon" href="{{ url_for('static', filename='avatar.png') }}" />
+        <title>
+            {% block title %}{% endblock %}
+        </title>
+    </head>
+    <body>
+        <nav>
+            <div class="inner-nav">
+                <div class="nav-item">
+                    <img class="site-logo"
+                         src="{{ url_for('static', filename='avatar.png') }}" />
+                    KoyunKapan Dashboard
+                </div>
+                <div class="nav-item right">
+                    <a href="{{ url_for("healthcheck") }}">Health Check</a>
+                </div>
+            </div>
+        </nav>
+        <div class="container">
+            <div class="panel-container">
+                {% block main %}{% endblock %}
+            </div>
+        </div>
+        <div style="margin-top: 1rem;"></div>
+    </body>
+</html>

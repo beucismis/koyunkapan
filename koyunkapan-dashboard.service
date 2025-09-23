@@ -1,0 +1,11 @@
+[Unit]
+After=network.target
+Description=KoyunKapan Dashboard Service
+
+[Service]
+Restart=always
+ExecStart=flask --app koyunkapan.dashboard.main:app run --port 3131 --debug
+Environment="KOYUNKAPAN_DATA_DIR=/home/user/koyunkapan/data"
+
+[Install]
+WantedBy=multi-user.target

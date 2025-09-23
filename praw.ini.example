@@ -1,0 +1,9 @@
+[bot]
+username = <username>
+password  = <password>
+client_id  = <client_id>
+client_secret = <client_secret>
+bot_name = <bot_name>
+bot_version = <bot_version>
+bot_author = <bot_author>
+user_agent = script:%(bot_name)s:v%(bot_version)s (by u/%(bot_author)s)

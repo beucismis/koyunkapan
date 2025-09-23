@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "koyunkapan"
+dynamic = ["version"]
+description = ''
+readme = "README.md"
+requires-python = ">=3.8"
+license = "MIT"
+keywords = []
+authors = [
+  { name = "beucismis", email = "beucismis@tutamail.com" },
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Programming Language :: Python :: Implementation :: PyPy",
+]
+dependencies = ["asyncpraw==7.8.1", "flask[async]==3.1.2", "tortoise-orm==0.25.1", "numpy==2.3.3"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/koyunkapan"]
+
+[project.urls]
+Source = "https://github.com/beucismis/koyunkapan"
+Issues = "https://github.com/beucismis/koyunkapan/issues"
+Documentation = "https://github.com/beucismis/koyunkapan#readme"
+
+[tool.hatch.version]
+path = "src/koyunkapan/bot/__init__.py"
+
+[project.optional-dependencies]
+dev = ["black", "djlint"]
+
+[tool.hatch.envs.default.scripts]
+format = "black -l 120 . && djlint . --reformat --format-css"
+bot = "PYTHONPATH=src KOYUNKAPAN_DATA_DIR=data/ python3 -m koyunkapan.bot.core"
+dashboard = "PYTHONPATH=src KOYUNKAPAN_DATA_DIR=data/ flask --app src.koyunkapan.dashboard.main run --debug --port 3131"
