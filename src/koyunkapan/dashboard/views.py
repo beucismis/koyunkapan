@@ -23,7 +23,8 @@ async def index() -> Union[str, werkzeug.wrappers.Response]:
             text=True,
             check=False,
         )
-        service_output = result.stdout
+        output_lines = result.stdout.splitlines()
+        service_output = "\n".join(output_lines[:12])
     except Exception as e:
         service_output = f"Error fetching status: {e}"
 
