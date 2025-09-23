@@ -7,14 +7,14 @@
             {% for reply in replies[-10:] %}
                 {% set submission_url = "https://www.reddit.com/r/" + reply.subreddit__name + "/comments/" + reply.submission_id %}
                 {% set comment_url = "https://www.reddit.com/r/" + reply.subreddit__name + "/comments/" + reply.submission_id + "/comment/" + reply.comment_id %}
-                <pre>
+                <div>
                     r/{{ reply.subreddit__name }} - Submission: <a href="{{ submission_url }}">{{ reply.submission_id }}</a> - Comment: <a href="{{ comment_url }}">{{ reply.comment_id }}</a> - Text: {{ reply.text }}
-                </pre>
+                </div>
             {% endfor %}
         </div>
         <div class="data-title">Last 100 Log</div>
         <div class="logs">
-            {% for line in logs %}<pre>{{ line.strip() }}</pre>{% endfor %}
+            {% for line in logs %}<div>{{ line.strip() }}</div>{% endfor %}
         </div>
         <div class="data-title">Bot Service Status</div>
         <div class="logs">
