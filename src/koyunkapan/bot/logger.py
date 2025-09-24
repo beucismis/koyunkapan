@@ -14,7 +14,7 @@ class Logger:
     }
     TEMPLATE = "[%(asctime)s] [%(levelname)s] %(message)s"
 
-    def __init__(self, level="INFO"):
+    def __init__(self, level: str = "INFO") -> None:
         self.log_file = configs.LOG_FILE
 
         self.level = self.LEVELS.get(level.upper(), logging.INFO)
@@ -39,17 +39,17 @@ class Logger:
 
         self.logger.info("--- Log started at %s ---", datetime.now())
 
-    def debug(self, message):
-        self.logger.debug(message)
+    def debug(self, message: str, *args) -> None:
+        self.logger.debug(message, *args)
 
-    def info(self, message):
-        self.logger.info(message)
+    def info(self, message: str, *args) -> None:
+        self.logger.info(message, *args)
 
-    def warning(self, message):
-        self.logger.warning(message)
+    def warning(self, message: str, *args) -> None:
+        self.logger.warning(message, *args)
 
-    def error(self, message):
-        self.logger.error(message)
+    def error(self, message: str, *args) -> None:
+        self.logger.error(message, *args)
 
-    def critical(self, message):
-        self.logger.critical(message)
+    def critical(self, message: str, *args) -> None:
+        self.logger.critical(message, *args)
