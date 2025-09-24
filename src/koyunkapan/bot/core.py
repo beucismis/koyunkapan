@@ -32,7 +32,7 @@ class Bot:
             log.info(f"Subreddit '{subreddit_name}' database found.")
 
         self.flairs = await models.Flair.filter(subreddit=self.subreddit_obj).values_list("fid", flat=True)
-        self.replies = await models.Reply.filter(flair__subreddit=self.subreddit_obj).values_list("text", flat=True)
+        self.replies = await models.Reply.filter(subreddit=self.subreddit_obj).values_list("submission_id", flat=True)
 
         if not self.flairs:
             await self.init_flair_replies()
@@ -42,8 +42,9 @@ class Bot:
 
         try:
             async for flair in self.subreddit.flair.link_templates:
-                # if flair["id"] not in self.replies:
-                await models.Flair.create(fid=flair["id"], name=flair["text"], subreddit=self.subreddit_obj)
+                await models.Flair.get_or_create(
+                    fid=flair["id"], subreddit=self.subreddit_obj, defaults={"name": flair["text"]}
+                )
         except Exception as e:
             log.error(f"Error while fetching flairs: {e}")
 
