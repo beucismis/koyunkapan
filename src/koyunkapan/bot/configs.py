@@ -5,6 +5,11 @@ DATA_DIR = os.environ.get("KOYUNKAPAN_DATA_DIR")
 LOG_FILE = os.path.join(DATA_DIR, "app.log")
 DB_FILE = os.path.join(DATA_DIR, "app.db")
 
+MIN_SLEEP_MINUTES = 10
+MAX_SLEEP_MINUTES = 25
+INBOX_CHECK_INTERVAL = 60
+WORKING_HOURS = [str(i).zfill(2) for i in range(24)]
+
 POST_LIMIT = 50
 SEARCH_LIMIT = 20
 MAX_KEYWORDS = 20
@@ -30,5 +35,3 @@ SUBREDDIT_NAMES = [
 
 FORBIDDEN_FLAIR = "Ciddi"
 FORBIDDEN_COMMENTS = ("[removed]", "[deleted]", "", " ", None)
-
-WORKING_HOURS = [str(i).zfill(2) for i in range(24)]
