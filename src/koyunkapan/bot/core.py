@@ -306,6 +306,7 @@ async def check_inbox(bot: Bot) -> None:
 
 async def run_post_processor(bot: Bot) -> None:
     while True:
+        await bot.setup()
         current_hour = time.strftime("%H")
 
         if current_hour in configs.WORKING_HOURS:
@@ -318,8 +319,7 @@ async def run_post_processor(bot: Bot) -> None:
         else:
             log.info(f"Outside working hours ({configs.WORKING_HOURS}). Bot is inactive.")
 
-        min_sleep_seconds = configs.MIN_SLEEP_MINUTES * 60
-        max_sleep_seconds = configs.MAX_SLEEP_MINUTES * 60
+        min_sleep_seconds, max_sleep_seconds = configs.MIN_SLEEP_MINUTES * 60, configs.MAX_SLEEP_MINUTES * 60
         sleep_duration = random.randint(min_sleep_seconds, max_sleep_seconds)
         minutes, seconds = divmod(sleep_duration, 60)
         log.info(f"Waiting for {minutes} minutes and {seconds} seconds...")
