@@ -1,8 +1,7 @@
 import numpy as np
 
 
-def get_keyword_combinations(keywords: list) -> list:
-    keywords: list = keywords
+def get_keyword_combinations(keywords: list[str]) -> list[str]:
     num_keywords: int = len(keywords)
 
     if not keywords:
@@ -39,7 +38,7 @@ def get_keyword_combinations(keywords: list) -> list:
     return output_queries
 
 
-def calculate_sentence_difference(s1, s2):
+def calculate_sentence_difference(s1: str | list[str], s2: str | list[str]) -> float:
     words1 = s1.split() if isinstance(s1, str) else s1
     words2 = s2.split() if isinstance(s2, str) else s2
 
