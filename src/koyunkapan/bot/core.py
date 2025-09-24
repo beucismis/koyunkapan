@@ -5,7 +5,7 @@ import warnings
 
 import asyncpraw
 import numpy as np
-from asyncpraw.models import Message
+from asyncpraw.models import Comment, Message, Submission
 from asyncprawcore import ServerError
 
 from . import configs, database, models, utils
@@ -17,11 +17,11 @@ warnings.filterwarnings("ignore")
 
 
 class Bot:
-    def __init__(self, reddit_instance):
+    def __init__(self, reddit_instance: asyncpraw.Reddit) -> None:
         self.reddit = reddit_instance
         self.posts, self.comments, self.keywords = [], [], []
 
-    async def setup(self):
+    async def setup(self) -> None:
         subreddit_name = random.choice(configs.SUBREDDIT_NAMES)
         self.subreddit = await self.reddit.subreddit(subreddit_name)
         self.subreddit_obj, created = await models.Subreddit.get_or_create(name=subreddit_name)
@@ -37,7 +37,7 @@ class Bot:
         if not self.flairs:
             await self.init_flair_replies()
 
-    async def init_flair_replies(self):
+    async def init_flair_replies(self) -> None:
         log.info("Creating reply database for flairs...")
 
         try:
@@ -47,7 +47,7 @@ class Bot:
         except Exception as e:
             log.error(f"Error while fetching flairs: {e}")
 
-    async def fetch_new_submissions(self):
+    async def fetch_new_submissions(self) -> None:
         self.submissions = []
 
         def is_valid(submission):
@@ -62,7 +62,7 @@ class Bot:
 
         log.info(f"{len(self.submissions)} potential submission collected.")
 
-    async def select_random_submission(self):
+    async def select_random_submission(self) -> Submission | None:
         for _ in range(configs.RANDOM_POST_COUNT):
             if not self.submissions:
                 return None
@@ -75,7 +75,7 @@ class Bot:
 
         return None
 
-    async def extract_keywords_from_submission(self, submission):
+    async def extract_keywords_from_submission(self, submission: Submission) -> None:
         self.keywords = []
         submission.comment_sort = "best"
 
@@ -92,11 +92,11 @@ class Bot:
 
         self.keywords = list(dict.fromkeys(self.keywords))[: configs.MAX_KEYWORDS]
 
-    async def find_similar_submissions(self, title, is_nsfw):
+    async def find_similar_submissions(self, title: str, is_nsfw: bool) -> list[Submission] | None:
         results = []
 
         try:
-            query = f"{' OR '.join(title.split())} nsfw:{'yes' if is_nsfw else 'no'}"
+            query = f"{(' OR ').join(title.split())} nsfw:{'yes' if is_nsfw else 'no'}"
             log.info(f"Query: '{query}'")
 
             async for post in self.subreddit.search(query, limit=configs.SEARCH_LIMIT):
@@ -107,7 +107,9 @@ class Bot:
             log.error(f"Server error occurred while searching for similar submissions: {e}")
             return None
 
-    async def collect_comments_from_submissions(self, submissions, original_submission):
+    async def collect_comments_from_submissions(
+        self, submissions: list[Submission], original_submission: Submission
+    ) -> None:
         self.comments = []
 
         for submission in submissions:
@@ -125,7 +127,7 @@ class Bot:
 
         log.info(f"'{len(self.comments)}' similar comments collected.")
 
-    def find_best_comment(self, submission):
+    def find_best_comment(self, submission: Submission) -> Comment | None:
         if self.comments:
             scores = np.array(
                 [
@@ -156,7 +158,7 @@ class Bot:
         log.warning("No suitable comment found.")
         return None
 
-    async def submission_comment(self, submission, comment):
+    async def submission_comment(self, submission: Submission, comment: Comment) -> None:
         comment_text = comment.body.splitlines()[0].lower()
 
         if comment_text:
@@ -186,7 +188,7 @@ class Bot:
             except Exception as e:
                 log.error(f"An error occurred while commenting: {e}")
 
-    async def process_post(self, submission_id=None):
+    async def process_post(self, submission_id: str | None = None) -> None:
         if submission_id:
             submission = await self.reddit.submission(id=submission_id)
         else:
@@ -214,7 +216,7 @@ class Bot:
         await self.submission_comment(submission, best_comment)
         log.info("--- Process Completed ---")
 
-    async def reply_to_mention(self, mention):
+    async def reply_to_mention(self, mention: Message) -> None:
         comments = []
         all_comments = set()
         submissions = []
@@ -286,7 +288,45 @@ class Bot:
             log.warning("No suitable reply found in any search results.")
 
 
-async def main():
+async def check_inbox(bot: Bot) -> None:
+    while True:
+        await bot.setup()
+        try:
+            async for item in bot.reddit.inbox.unread(limit=None):
+                await item.mark_read()
+                await Message.mark_read(item)
+
+                if item.type == "comment_reply":
+                    await bot.reply_to_mention(item)
+        except Exception as e:
+            log.error(f"An error occurred while checking inbox: {e}")
+
+        await asyncio.sleep(configs.INBOX_CHECK_INTERVAL)
+
+
+async def run_post_processor(bot: Bot) -> None:
+    while True:
+        current_hour = time.strftime("%H")
+
+        if current_hour in configs.WORKING_HOURS:
+            try:
+                log.info("Processing a random post...")
+                await bot.process_post()
+            except Exception as e:
+                log.error(f"An exception occurred during the main process: {e}")
+
+        else:
+            log.info(f"Outside working hours ({configs.WORKING_HOURS}). Bot is inactive.")
+
+        min_sleep_seconds = configs.MIN_SLEEP_MINUTES * 60
+        max_sleep_seconds = configs.MAX_SLEEP_MINUTES * 60
+        sleep_duration = random.randint(min_sleep_seconds, max_sleep_seconds)
+        minutes, seconds = divmod(sleep_duration, 60)
+        log.info(f"Waiting for {minutes} minutes and {seconds} seconds...")
+        await asyncio.sleep(sleep_duration)
+
+
+async def main() -> None:
     async with asyncpraw.Reddit(site_name="bot", config_interpolation="basic") as reddit:
         if reddit.read_only:
             log.warnings("Connected in read-only mode. Check praw.ini configuration.")
@@ -297,31 +337,10 @@ async def main():
         await database.init()
         bot = Bot(reddit)
 
-        while True:
-            current_hour = time.strftime("%H")
+        inbox_task = asyncio.create_task(check_inbox(bot))
+        processor_task = asyncio.create_task(run_post_processor(bot))
 
-            if current_hour in configs.WORKING_HOURS:
-                await bot.setup()
-
-                try:
-                    log.info("Processing a random post...")
-                    await bot.process_post()
-                except Exception as e:
-                    log.error(f"An exception occurred during the main process: {e}")
-
-                async for item in reddit.inbox.unread(limit=None):
-                    await item.mark_read()
-                    await Message.mark_read(item)
-
-                    if item.type == "comment_reply":
-                        await bot.reply_to_mention(item)
-
-            else:
-                log.info(f"Outside working hours ({configs.WORKING_HOURS}). Bot is inactive.")
-
-            sleep_duration = random.randint(600, 1500)
-            log.info(f"Waiting for {sleep_duration // 60} minutes...")
-            await asyncio.sleep(sleep_duration)
+        await asyncio.gather(inbox_task, processor_task)
 
     await database.close()
 
