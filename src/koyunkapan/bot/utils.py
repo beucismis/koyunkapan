@@ -1,40 +1,18 @@
+import itertools
 import numpy as np
 
 
 def get_keyword_combinations(keywords: list[str]) -> list[str]:
-    num_keywords: int = len(keywords)
-
     if not keywords:
         return []
 
-    binary_seed = "0" * num_keywords
-    current_binary_num = binary_seed
-    combinations_by_length = {i: [] for i in range(1, num_keywords + 1)}
+    all_combinations = []
+    for i in range(1, len(keywords) + 1):
+        all_combinations.extend(itertools.combinations(keywords, i))
 
-    for _ in range(1, 2**num_keywords):
-        current_binary_num = bin(int(current_binary_num, 2) + 1)[2:]
-        output_binary = current_binary_num.zfill(num_keywords)
-        combinations_by_length[output_binary.count("1")].append(output_binary)
+    output_queries = [" AND ".join(f'"{k}"' for k in combo) for combo in all_combinations]
+    output_queries.sort(key=len, reverse=True)
 
-    output_queries = []
-
-    for length in sorted(combinations_by_length.keys()):
-        or_grouped_queries = []
-        binary_strings = combinations_by_length[length]
-
-        for binary_str in binary_strings:
-            and_grouped_keywords = []
-
-            for i, bit in enumerate(binary_str):
-                if bit == "1":
-                    and_grouped_keywords.append(keywords[i])
-            if and_grouped_keywords:
-                or_grouped_queries.append("&".join(and_grouped_keywords))
-
-        if or_grouped_queries:
-            output_queries.append("|".join(or_grouped_queries))
-
-    output_queries.reverse()
     return output_queries
 
 

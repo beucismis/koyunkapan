@@ -3,10 +3,17 @@ from datetime import UTC, datetime
 
 import flask
 
-from . import __version__
+from koyunkapan import __version__
+from koyunkapan.bot import database
+
 
 app = flask.Flask(__name__)
 app.secret_key = secrets.token_hex(24)
+
+
+@app.before_request
+async def init_db() -> None:
+    await database.init()
 
 
 @app.route("/healthcheck")

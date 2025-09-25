@@ -41,25 +41,38 @@ class Bot:
         log.info("Creating reply database for flairs...")
 
         try:
+            new_flairs = []
+            existing_flair_fids = await models.Flair.filter(subreddit=self.subreddit_obj).values_list("fid", flat=True)
+            existing_flair_fids = set(existing_flair_fids)
+
             async for flair in self.subreddit.flair.link_templates:
-                await models.Flair.get_or_create(
-                    fid=flair["id"], subreddit=self.subreddit_obj, defaults={"name": flair["text"]}
-                )
+                if flair["id"] not in existing_flair_fids:
+                    new_flairs.append(models.Flair(fid=flair["id"], subreddit=self.subreddit_obj, name=flair["text"]))
+
+            if new_flairs:
+                await models.Flair.bulk_create(new_flairs)
+                log.info(f"Added {len(new_flairs)} new flairs to the database.")
+
+        except asyncpraw.exceptions.APIException as e:
+            log.error(f"An API error occurred while fetching flairs: {e}")
         except Exception as e:
-            log.error(f"Error while fetching flairs: {e}")
+            log.error(f"An unexpected error occurred while fetching flairs: {e}")
 
     async def fetch_new_submissions(self) -> None:
         self.submissions = []
+        seen_ids = set()
 
-        def is_valid(submission):
+        def _is_valid(submission):
             return submission.id not in self.replies and submission.link_flair_text != configs.FORBIDDEN_FLAIR
 
-        async for submission in self.subreddit.new(limit=configs.POST_LIMIT):
-            if is_valid(submission) and submission not in self.submissions:
-                self.submissions.append(submission)
-        async for submission in self.subreddit.hot(limit=configs.POST_LIMIT):
-            if is_valid(submission) and submission not in self.submissions:
-                self.submissions.append(submission)
+        async def _collect(generator):
+            async for submission in generator:
+                if submission.id not in seen_ids and _is_valid(submission):
+                    self.submissions.append(submission)
+                    seen_ids.add(submission.id)
+
+        await _collect(self.subreddit.new(limit=configs.POST_LIMIT))
+        await _collect(self.subreddit.hot(limit=configs.POST_LIMIT))
 
         log.info(f"{len(self.submissions)} potential submission collected.")
 
@@ -110,8 +123,8 @@ class Bot:
 
     async def collect_comments_from_submissions(
         self, submissions: list[Submission], original_submission: Submission
-    ) -> None:
-        self.comments = []
+    ) -> list[Comment]:
+        comments = []
 
         for submission in submissions:
             submission.comment_sort = "best"
@@ -124,16 +137,17 @@ class Bot:
                 comment_text = top_level_comment.body.splitlines()[0].lower()
 
                 if comment_text not in configs.FORBIDDEN_COMMENTS and len(comment_text) > 0:
-                    self.comments.append(top_level_comment)
+                    comments.append(top_level_comment)
 
-        log.info(f"'{len(self.comments)}' similar comments collected.")
+        log.info(f"'{len(comments)}' similar comments collected.")
+        return comments
 
-    def find_best_comment(self, submission: Submission) -> Comment | None:
-        if self.comments:
+    def find_best_comment(self, submission: Submission, comments: list[Comment]) -> Comment | None:
+        if comments:
             scores = np.array(
                 [
                     utils.calculate_sentence_difference(comment.body.splitlines()[0].lower(), self.keywords)
-                    for comment in self.comments
+                    for comment in comments
                 ]
             )
             min_score = np.min(scores)
@@ -141,7 +155,7 @@ class Bot:
 
             if best_indices.size > 0:
                 chosen_index = random.choice(best_indices)
-                best_comment = self.comments[chosen_index]
+                best_comment = comments[chosen_index]
                 log.info(f'Most suitable comment found: "{best_comment.body.splitlines()[0].lower()}"')
                 return best_comment
 
@@ -159,18 +173,20 @@ class Bot:
         log.warning("No suitable comment found.")
         return None
 
-    async def submission_comment(self, submission: Submission, comment: Comment) -> None:
+    async def submission_comment(self, submission: Submission, comment: Comment | None) -> None:
+        if not comment:
+            log.warning(f"No suitable comment found for submission {submission.id}.")
+            return
+
         comment_text = comment.body.splitlines()[0].lower()
 
         if comment_text:
             try:
-                # --- --- --- --- --- --- --- --- --- --- --- ---
                 bot_comment = await submission.reply(comment_text)
-                # --- --- --- --- --- --- --- --- --- --- --- ---
 
                 try:
                     flair = await models.Flair.get(fid=submission.link_flair_template_id, subreddit=self.subreddit_obj)
-                except Exception as e:
+                except Exception:
                     flair = None
 
                 await models.Reply.create(
@@ -186,8 +202,10 @@ class Bot:
 
                 log.info(f"Successfully commented on post with ID '{submission.id}'.")
 
+            except asyncpraw.exceptions.APIException as e:
+                log.error(f"An API error occurred while commenting: {e}")
             except Exception as e:
-                log.error(f"An error occurred while commenting: {e}")
+                log.error(f"An unexpected error occurred while commenting: {e}")
 
     async def process_post(self, submission_id: str | None = None) -> None:
         if submission_id:
@@ -211,16 +229,16 @@ class Bot:
         similar_submissions = await self.find_similar_submissions(submission.title, submission.over_18)
 
         if similar_submissions:
-            await self.collect_comments_from_submissions(similar_submissions, submission)
+            comments = await self.collect_comments_from_submissions(similar_submissions, submission)
+            best_comment = self.find_best_comment(submission, comments)
+        else:
+            best_comment = self.find_best_comment(submission, [])
 
-        best_comment = self.find_best_comment(submission)
         await self.submission_comment(submission, best_comment)
         log.info("--- Process Completed ---")
 
     async def reply_to_mention(self, mention: Message) -> None:
-        comments = []
         all_comments = set()
-        submissions = []
         best_reply_source = None
 
         log.info(f"New reply request received: {mention.id}")
@@ -234,30 +252,36 @@ class Bot:
         search_queries = utils.get_keyword_combinations(keywords)
         log.info(f"{len(search_queries)} different search queries created.")
 
+        subreddit_names = await models.Subreddit.all().values_list("name", flat=True)
+
         for i, query in enumerate(search_queries):
+            submissions = []
             cache = []
+            total_comments_fetched = 0
             log.info(f"Search {i + 1}/{len(search_queries)}: '{query}'")
 
-            async for submission in original_comment.subreddit.new(limit=configs.POST_LIMIT):
-                submissions.append(submission)
+            for subreddit_name in subreddit_names:
+                subreddit = await self.reddit.subreddit(subreddit_name)
+                async for submission in subreddit.search(query, limit=configs.POST_LIMIT):
+                    submissions.append(submission)
 
             for submission in submissions:
                 await submission.load()
                 await submission.comments.replace_more(limit=None)
 
                 for comment in submission.comments.list():
-                    comments.append(comment)
+                    total_comments_fetched += 1
+                    if (
+                        comment.body not in configs.FORBIDDEN_COMMENTS
+                        and comment.id != original_comment.id
+                        and comment.id not in all_comments
+                    ):
+                        cache.append(comment)
+                        all_comments.add(comment.id)
 
-            log.info(f"'{len(submissions)}' submissions yielded '{len(comments)}' comments for replying.")
-
-            for c in comments:
-                if (
-                    c.body not in configs.FORBIDDEN_COMMENTS
-                    and c.id != original_comment.id
-                    and c.id not in all_comments
-                ):
-                    cache.append(c)
-                    all_comments.add(c.id)
+            log.info(
+                f"Collected '{total_comments_fetched}' comments from '{len(submissions)}' submissions from '{len(subreddit_names)}' subreddits."
+            )
 
             log.info(f"'{len(cache)}' comments found.")
 
@@ -280,9 +304,16 @@ class Bot:
             valid_replies = [r.body for r in best_reply_source.replies if r.body not in configs.FORBIDDEN_COMMENTS]
 
             if valid_replies:
-                reply_text = random.choice(valid_replies)
-                await original_comment.reply(reply_text)
-                log.info(f"Reply sent to comment with ID '{mention.id}'.")
+                await original_comment.load()
+                existing_replies = [r.body for r in original_comment.replies]
+                available_replies = [r for r in valid_replies if r not in existing_replies]
+
+                if available_replies:
+                    reply_text = random.choice(available_replies)
+                    await original_comment.reply(reply_text)
+                    log.info(f"Reply sent to comment with ID '{mention.id}'.")
+                else:
+                    log.warning("No new reply to post. All valid replies have been used.")
             else:
                 log.warning("No valid reply found in the reply source.")
         else:
@@ -291,7 +322,6 @@ class Bot:
 
 async def check_inbox(bot: Bot) -> None:
     while True:
-        await bot.setup()
         try:
             async for item in bot.reddit.inbox.unread(limit=None):
                 await item.mark_read()

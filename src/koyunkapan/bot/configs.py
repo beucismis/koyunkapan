@@ -20,7 +20,6 @@ SIMILARITY_THRESHOLD = 1.35
 SUBREDDIT_NAMES = [
     "test",
     "KGBTR",
-    "sinema",
     "bokteri",
     "Eleteria",
     "CuteTopia",
