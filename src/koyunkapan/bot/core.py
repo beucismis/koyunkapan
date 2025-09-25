@@ -175,7 +175,7 @@ class Bot:
 
     async def submission_comment(self, submission: Submission, comment: Comment | None) -> None:
         if not comment:
-            log.warning(f"No suitable comment found for submission {submission.id}.")
+            log.warning(f"No suitable comment found for submission '{submission.id}'.")
             return
 
         comment_text = comment.body.splitlines()[0].lower()
