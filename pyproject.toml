@@ -35,10 +35,10 @@ Issues = "https://github.com/beucismis/koyunkapan/issues"
 Documentation = "https://github.com/beucismis/koyunkapan#readme"
 
 [tool.hatch.version]
-path = "src/koyunkapan/bot/__init__.py"
+path = "src/koyunkapan/__init__.py"
 
 [project.optional-dependencies]
-dev = ["black", "djlint"]
+dev = ["black", "djlint", "aerich"]
 
 [tool.hatch.envs.default.scripts]
 format = "black -l 120 . && djlint . --reformat --format-css"
