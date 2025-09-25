@@ -4,7 +4,7 @@ Source code for u/koyunkapan. This repository is forked from the original [oldve
 
 ## Running
 
-Create `praw.ini` file in user config (`/home/user/.config/`) directory.
+Create a `praw.ini` file in the project's root directory using `praw.ini.example` as a template.
 
 ```
 git clone https://github.com/beucismis/koyunkapan
