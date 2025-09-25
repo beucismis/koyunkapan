@@ -1,4 +1,5 @@
 # Custom
+data/
 test.py
 *.ini
 logs/
