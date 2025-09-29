@@ -144,33 +144,29 @@ class Bot:
 
     def find_best_comment(self, submission: Submission, comments: list[Comment]) -> Comment | None:
         if comments:
-            scores = np.array(
-                [
-                    utils.calculate_sentence_difference(comment.body.splitlines()[0].lower(), self.keywords)
-                    for comment in comments
-                ]
-            )
-            min_score = np.min(scores)
-            best_indices = np.where((scores == min_score) | (scores <= min_score * configs.SIMILARITY_THRESHOLD))[0]
+            comment_scores = [
+                (comment, utils.calculate_sentence_difference(comment.body.splitlines()[0].lower(), self.keywords))
+                for comment in comments
+            ]
 
-            if best_indices.size > 0:
-                chosen_index = random.choice(best_indices)
-                best_comment = comments[chosen_index]
-                log.info(f'Most suitable comment found: "{best_comment.body.splitlines()[0].lower()}"')
+            if not comment_scores:
+                log.warning("Could not calculate scores for any comments.")
+                return None
+
+            min_score = min(score for comment, score in comment_scores)
+            similar_comments = [
+                comment for comment, score in comment_scores if score <= min_score * configs.SIMILARITY_THRESHOLD
+            ]
+
+            if similar_comments:
+                similar_comments.sort(key=lambda c: c.score, reverse=True)
+                best_comment = similar_comments[0]
+                log.info(
+                    f'Most suitable comment found: "{best_comment.body.splitlines()[0].lower()}" with score {best_comment.score}'
+                )
                 return best_comment
 
         log.warning("No suitable match found among similar comments.")
-        return
-
-        if submission.link_flair_template_id and submission.link_flair_template_id in self.replies_data:
-            flair_replies = self.replies_data[submission.link_flair_template_id]["replies"]
-
-            if flair_replies:
-                chosen_reply = random.choice(flair_replies)
-                log.info(f"Using flair-specific reply: '{chosen_reply}'")
-                return chosen_reply
-
-        log.warning("No suitable comment found.")
         return None
 
     async def submission_comment(self, submission: Submission, comment: Comment | None) -> None:
@@ -238,86 +234,74 @@ class Bot:
         log.info("--- Process Completed ---")
 
     async def reply_to_mention(self, mention: Message) -> None:
-        all_comments = set()
-        best_reply_source = None
-
         log.info(f"New reply request received: {mention.id}")
-        original_comment = await self.reddit.comment(mention.id)
-        keywords = original_comment.body.split()
 
-        if not keywords:
-            log.warning("Comment to reply to is empty.")
-            return
+        try:
+            original_comment = await self.reddit.comment(mention.id)
+            await original_comment.load()
+            keywords = original_comment.body.split()
 
-        search_queries = utils.get_keyword_combinations(keywords)
-        log.info(f"{len(search_queries)} different search queries created.")
+            if not keywords:
+                log.warning("Comment to reply to is empty.")
+                return
 
-        subreddit_names = await models.Subreddit.all().values_list("name", flat=True)
+            search_queries = utils.get_keyword_combinations(keywords)
+            log.info(f"{len(search_queries)} different search queries created.")
 
-        for i, query in enumerate(search_queries):
-            submissions = []
-            cache = []
-            total_comments_fetched = 0
-            log.info(f"Search {i + 1}/{len(search_queries)}: '{query}'")
+            subreddit_names = await models.Subreddit.all().values_list("name", flat=True)
 
-            for subreddit_name in subreddit_names:
-                subreddit = await self.reddit.subreddit(subreddit_name)
-                async for submission in subreddit.search(query, limit=configs.POST_LIMIT):
-                    submissions.append(submission)
+            all_potential_source_comments = []
+            processed_comment_ids = {original_comment.id}
 
-            for submission in submissions:
-                await submission.load()
-                await submission.comments.replace_more(limit=None)
+            for i, query in enumerate(search_queries):
+                log.info(f"Search {i + 1}/{len(search_queries)}: '{query}'")
 
-                for comment in submission.comments.list():
-                    total_comments_fetched += 1
-                    if (
-                        comment.body not in configs.FORBIDDEN_COMMENTS
-                        and comment.id != original_comment.id
-                        and comment.id not in all_comments
-                    ):
-                        cache.append(comment)
-                        all_comments.add(comment.id)
+                submissions = []
+                for subreddit_name in subreddit_names:
+                    subreddit = await self.reddit.subreddit(subreddit_name)
+                    async for submission in subreddit.search(query, limit=configs.POST_LIMIT):
+                        submissions.append(submission)
 
-            log.info(
-                f"Collected '{total_comments_fetched}' comments from '{len(submissions)}' submissions from '{len(subreddit_names)}' subreddits."
-            )
+                for submission in submissions:
+                    await submission.load()
+                    await submission.comments.replace_more(limit=None)
 
-            log.info(f"'{len(cache)}' comments found.")
+                    for comment in submission.comments.list():
+                        if comment.id not in processed_comment_ids and comment.body not in configs.FORBIDDEN_COMMENTS:
+                            all_potential_source_comments.append(comment)
+                            processed_comment_ids.add(comment.id)
 
-            for c in sorted(cache, key=lambda x: x.created_utc, reverse=True):
+            log.info(f"Collected {len(all_potential_source_comments)} potential source comments.")
+
+            best_reply_found = None
+
+            for source_comment in all_potential_source_comments:
                 try:
-                    c.refresh()
-                    if c.replies:
-                        best_reply_source = c
-                        break
+                    await source_comment.refresh()
+                    for reply in source_comment.replies:
+                        if reply.body not in configs.FORBIDDEN_COMMENTS:
+                            if best_reply_found is None or reply.score > best_reply_found.score:
+                                best_reply_found = reply
                 except Exception as e:
-                    log.error(f"Error while updating comment: {e}")
+                    log.error(f"Error processing source comment {source_comment.id} for replies: {e}")
 
-            if best_reply_source:
-                break
+            if best_reply_found:
+                log.info(f"Highest-rated reply found: '{best_reply_found.id}' with score {best_reply_found.score}")
+                log.info(f"URL: https://www.reddit.com{best_reply_found.permalink}")
 
-        if best_reply_source:
-            log.info(f"Suitable reply source found: '{best_reply_source.id}'")
-            log.info(f"URL: https://www.reddit.com{best_reply_source.permalink}")
-
-            valid_replies = [r.body for r in best_reply_source.replies if r.body not in configs.FORBIDDEN_COMMENTS]
-
-            if valid_replies:
-                await original_comment.load()
                 existing_replies = [r.body for r in original_comment.replies]
-                available_replies = [r for r in valid_replies if r not in existing_replies]
-
-                if available_replies:
-                    reply_text = random.choice(available_replies)
-                    await original_comment.reply(reply_text)
+                if best_reply_found.body not in existing_replies:
+                    await original_comment.reply(best_reply_found.body)
                     log.info(f"Reply sent to comment with ID '{mention.id}'.")
                 else:
-                    log.warning("No new reply to post. All valid replies have been used.")
+                    log.warning(
+                        f"Best reply found ('{best_reply_found.id}') has already been used for this comment chain."
+                    )
             else:
-                log.warning("No valid reply found in the reply source.")
-        else:
-            log.warning("No suitable reply found in any search results.")
+                log.warning("No suitable reply found in any search results.")
+
+        except Exception as e:
+            log.error(f"An unexpected error occurred in reply_to_mention for mention {mention.id}: {e}")
 
 
 async def check_inbox(bot: Bot) -> None:
