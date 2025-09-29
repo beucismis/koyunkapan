@@ -142,7 +142,7 @@ class Bot:
         log.info(f"'{len(comments)}' similar comments collected.")
         return comments
 
-    def find_best_comment(self, submission: Submission, comments: list[Comment]) -> Comment | None:
+    def find_best_comments(self, submission: Submission, comments: list[Comment]) -> list[Comment]:
         if comments:
             comment_scores = [
                 (comment, utils.calculate_sentence_difference(comment.body.splitlines()[0].lower(), self.keywords))
@@ -151,7 +151,7 @@ class Bot:
 
             if not comment_scores:
                 log.warning("Could not calculate scores for any comments.")
-                return None
+                return []
 
             min_score = min(score for comment, score in comment_scores)
             similar_comments = [
@@ -160,21 +160,29 @@ class Bot:
 
             if similar_comments:
                 similar_comments.sort(key=lambda c: c.score, reverse=True)
-                best_comment = similar_comments[0]
-                log.info(
-                    f'Most suitable comment found: "{best_comment.body.splitlines()[0].lower()}" with score {best_comment.score}'
-                )
-                return best_comment
+                return similar_comments
 
         log.warning("No suitable match found among similar comments.")
-        return None
+        return []
 
-    async def submission_comment(self, submission: Submission, comment: Comment | None) -> None:
-        if not comment:
-            log.warning(f"No suitable comment found for submission '{submission.id}'.")
+    async def submission_comment(self, submission: Submission, comments: list[Comment]) -> None:
+        if not comments:
+            log.warning(f"No suitable comments found for submission '{submission.id}'.")
             return
 
-        comment_text = comment.body.splitlines()[0].lower()
+        best_comment = None
+        for comment in comments:
+            comment_text = comment.body.splitlines()[0].lower()
+            is_used = await models.Reply.filter(text=comment_text).exists()
+            if not is_used:
+                best_comment = comment
+                break
+
+        if not best_comment:
+            log.warning(f"All suitable comments for submission '{submission.id}' have already been used.")
+            return
+
+        comment_text = best_comment.body.splitlines()[0].lower()
 
         if comment_text:
             try:
@@ -189,9 +197,9 @@ class Bot:
                     text=comment_text,
                     submission_id=submission.id,
                     comment_id=bot_comment.id,
-                    reference_submission_id=comment.submission.id,
-                    reference_comment_id=comment.id,
-                    reference_author=comment.author,
+                    reference_submission_id=best_comment.submission.id,
+                    reference_comment_id=best_comment.id,
+                    reference_author=str(best_comment.author),
                     flair=flair,
                     subreddit=self.subreddit_obj,
                 )
@@ -226,18 +234,22 @@ class Bot:
 
         if similar_submissions:
             comments = await self.collect_comments_from_submissions(similar_submissions, submission)
-            best_comment = self.find_best_comment(submission, comments)
+            best_comments = self.find_best_comments(submission, comments)
         else:
-            best_comment = self.find_best_comment(submission, [])
+            best_comments = self.find_best_comments(submission, [])
 
-        await self.submission_comment(submission, best_comment)
+        await self.submission_comment(submission, best_comments)
         log.info("--- Process Completed ---")
 
     async def reply_to_mention(self, mention: Message) -> None:
         log.info(f"New reply request received: {mention.id}")
 
         try:
-            original_comment = await self.reddit.comment(mention.id)
+            if not mention.parent_id.startswith("t1_"):
+                log.warning(f"Parent of mention {mention.id} is not a comment, skipping.")
+                return
+
+            original_comment = await self.reddit.comment(mention.parent_id)
             await original_comment.load()
             keywords = original_comment.body.split()
 
@@ -273,30 +285,44 @@ class Bot:
 
             log.info(f"Collected {len(all_potential_source_comments)} potential source comments.")
 
-            best_reply_found = None
-
+            all_replies = []
             for source_comment in all_potential_source_comments:
                 try:
                     await source_comment.refresh()
                     for reply in source_comment.replies:
                         if reply.body not in configs.FORBIDDEN_COMMENTS:
-                            if best_reply_found is None or reply.score > best_reply_found.score:
-                                best_reply_found = reply
+                            all_replies.append(reply)
                 except Exception as e:
                     log.error(f"Error processing source comment {source_comment.id} for replies: {e}")
+
+            all_replies.sort(key=lambda r: r.score, reverse=True)
+
+            best_reply_found = None
+            for reply in all_replies:
+                is_used = await models.Reply.filter(text=reply.body).exists()
+                if not is_used:
+                    best_reply_found = reply
+                    break
 
             if best_reply_found:
                 log.info(f"Highest-rated reply found: '{best_reply_found.id}' with score {best_reply_found.score}")
                 log.info(f"URL: https://www.reddit.com{best_reply_found.permalink}")
 
-                existing_replies = [r.body for r in original_comment.replies]
-                if best_reply_found.body not in existing_replies:
-                    await original_comment.reply(best_reply_found.body)
-                    log.info(f"Reply sent to comment with ID '{mention.id}'.")
-                else:
-                    log.warning(
-                        f"Best reply found ('{best_reply_found.id}') has already been used for this comment chain."
-                    )
+                bot_comment = await original_comment.reply(best_reply_found.body)
+                log.info(f"Reply sent to comment with ID '{mention.id}'.")
+
+                subreddit_name = original_comment.subreddit.display_name
+                subreddit_obj, created = await models.Subreddit.get_or_create(name=subreddit_name)
+
+                await models.Reply.create(
+                    text=best_reply_found.body,
+                    submission_id=original_comment.submission.id,
+                    comment_id=bot_comment.id,
+                    reference_submission_id=best_reply_found.submission.id,
+                    reference_comment_id=best_reply_found.id,
+                    reference_author=str(best_reply_found.author),
+                    subreddit=subreddit_obj,
+                )
             else:
                 log.warning("No suitable reply found in any search results.")
 
