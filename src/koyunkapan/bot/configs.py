@@ -18,18 +18,7 @@ TOP_COMMENT_LIMIT = 5
 SIMILARITY_THRESHOLD = 1.35
 
 SUBREDDIT_NAMES = [
-    "test",
     "KGBTR",
-    "bokteri",
-    "Eleteria",
-    "CuteTopia",
-    "WeebTurks",
-    "Cikopolis",
-    "TurkishCats",
-    "Turkishdogs",
-    "SacmaBirSub",
-    "kopyamakarna",
-    "CursedYemekler",
 ]
 
 FORBIDDEN_FLAIR = "Ciddi"
