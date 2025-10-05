@@ -19,6 +19,16 @@ SIMILARITY_THRESHOLD = 1.35
 
 SUBREDDIT_NAMES = [
     "KGBTR",
+    "bokteri",
+    "Eleteria",
+    "CuteTopia",
+    "WeebTurks",
+    "Cikopolis",
+    "TurkishCats",
+    "Turkishdogs",
+    "SacmaBirSub",
+    "kopyamakarna",
+    "CursedYemekler",
 ]
 
 FORBIDDEN_FLAIR = "Ciddi"
