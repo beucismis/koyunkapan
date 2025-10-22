@@ -18,3 +18,7 @@ TORTOISE_ORM = {
 async def init() -> None:
     await Tortoise.init(db_url=f"sqlite://{database_file}", modules={"models": ["koyunkapan.bot.models"]})
     await Tortoise.generate_schemas()
+
+
+async def close() -> None:
+    await Tortoise.close_connections()
