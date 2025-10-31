@@ -11,7 +11,6 @@ from asyncprawcore import ServerError
 from . import configs, database, models, utils
 from .logger import Logger
 
-
 log = Logger()
 warnings.filterwarnings("ignore")
 

@@ -6,9 +6,9 @@ from typing import Union
 
 import flask
 import werkzeug
+from koyunkapan.bot import configs, models
 
 from . import main
-from koyunkapan.bot import configs, models
 
 
 @main.app.route("/")

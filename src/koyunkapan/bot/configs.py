@@ -1,6 +1,5 @@
 import os
 
-
 DATA_DIR = os.environ.get("KOYUNKAPAN_DATA_DIR")
 LOG_FILE = os.path.join(DATA_DIR, "app.log")
 DB_FILE = os.path.join(DATA_DIR, "app.db")

@@ -2,7 +2,6 @@ from tortoise import Tortoise
 
 from . import configs
 
-
 database_file = configs.DB_FILE
 TORTOISE_ORM = {
     "connections": {"default": f"sqlite://{database_file}"},
