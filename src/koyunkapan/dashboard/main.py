@@ -1,4 +1,5 @@
 import asyncio
+import atexit
 import secrets
 from datetime import UTC, datetime
 
@@ -16,9 +17,11 @@ async def init_db() -> None:
     await database.init()
 
 
-@app.teardown_request
-def close_db(exception=None) -> None:
+def close_db() -> None:
     asyncio.run(database.close())
+
+
+atexit.register(close_db)
 
 
 @app.route("/healthcheck")

@@ -14,9 +14,16 @@ TORTOISE_ORM = {
 }
 
 
+_db_initialized = False
+
+
 async def init() -> None:
+    global _db_initialized
+    if _db_initialized:
+        return
     await Tortoise.init(db_url=f"sqlite://{database_file}", modules={"models": ["koyunkapan.bot.models"]})
     await Tortoise.generate_schemas()
+    _db_initialized = True
 
 
 async def close() -> None:
