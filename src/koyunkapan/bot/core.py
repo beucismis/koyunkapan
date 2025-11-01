@@ -98,7 +98,11 @@ class Bot:
         await submission.load()
 
         for top_level_comment in submission.comments.list()[: configs.TOP_COMMENT_LIMIT]:
-            if top_level_comment.body not in configs.FORBIDDEN_COMMENTS:
+            if (
+                top_level_comment.body
+                and top_level_comment.body.strip()
+                and top_level_comment.body not in configs.FORBIDDEN_COMMENTS
+            ):
                 comment_first_line = top_level_comment.body.splitlines()[0]
 
                 for word in comment_first_line.split():
@@ -301,7 +305,7 @@ class Bot:
 
                 try:
                     for reply in source_comment.replies:
-                        if reply.body not in configs.FORBIDDEN_COMMENTS:
+                        if reply.body and reply.body.strip() and reply.body not in configs.FORBIDDEN_COMMENTS:
                             all_replies.append(reply)
 
                 except RequestException as e:
