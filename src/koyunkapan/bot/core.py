@@ -263,13 +263,11 @@ class Bot:
             all_potential_source_comments = []
             processed_comment_ids = {original_comment.id}
 
-            log.info("Iterating through search queries...")
-
             for i, query in enumerate(search_queries):
                 log.info(f"Search {i + 1}/{len(search_queries)}: '{query}'")
                 await asyncio.sleep(2)
+
                 submissions = []
-                log.info("Iterating through subreddit names...")
 
                 for subreddit_name in subreddit_names:
                     subreddit = await self.reddit.subreddit(subreddit_name)
@@ -277,11 +275,10 @@ class Bot:
                     async for submission in subreddit.search(query, limit=configs.POST_LIMIT):
                         submissions.append(submission)
 
-                log.info("Iterating through submissions...")
-
                 for submission in submissions:
                     await asyncio.sleep(1)
                     await submission.load()
+
                     await submission.comments.replace_more(limit=None)
 
                     for comment in submission.comments.list():
@@ -290,16 +287,12 @@ class Bot:
                             processed_comment_ids.add(comment.id)
 
             log.info(f"Collected {len(all_potential_source_comments)} potential source comments.")
+
             all_replies = []
 
-            log.info("Iterating through potential source comments...")
             for source_comment in all_potential_source_comments:
                 await asyncio.sleep(1)
-
                 try:
-                    await source_comment.refresh()
-                    log.info("Iterating through replies...")
-
                     for reply in source_comment.replies:
                         if reply.body not in configs.FORBIDDEN_COMMENTS:
                             all_replies.append(reply)
@@ -309,7 +302,6 @@ class Bot:
 
             all_replies.sort(key=lambda r: r.score, reverse=True)
             best_reply_found = None
-            log.info("Iterating through all_replies...")
 
             for reply in all_replies:
                 is_used = await models.Reply.filter(text=reply.body).exists()
@@ -320,6 +312,7 @@ class Bot:
 
             if best_reply_found:
                 log.info(f"Highest-rated reply found: '{best_reply_found.id}' with score {best_reply_found.score}")
+
                 log.info(f"URL: https://www.reddit.com{best_reply_found.permalink}")
                 bot_comment = await original_comment.reply(best_reply_found.body)
                 log.info(f"Reply sent to comment with ID '{mention.id}'.")
