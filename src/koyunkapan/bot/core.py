@@ -264,6 +264,7 @@ class Bot:
 
             for i, query in enumerate(search_queries):
                 log.info(f"Search {i + 1}/{len(search_queries)}: '{query}'")
+                await asyncio.sleep(2)
 
                 submissions = []
 
@@ -274,6 +275,7 @@ class Bot:
                         submissions.append(submission)
 
                 for submission in submissions:
+                    await asyncio.sleep(1)
                     await submission.load()
 
                     await submission.comments.replace_more(limit=None)
@@ -288,6 +290,7 @@ class Bot:
             all_replies = []
 
             for source_comment in all_potential_source_comments:
+                await asyncio.sleep(1)
                 try:
                     await source_comment.refresh()
 
