@@ -262,11 +262,11 @@ class Bot:
             subreddit_names = await models.Subreddit.all().values_list("name", flat=True)
             all_potential_source_comments = []
             processed_comment_ids = {original_comment.id}
+            limit_reached = False
 
             for i, query in enumerate(search_queries):
                 log.info(f"Search {i + 1}/{len(search_queries)}: '{query}'")
                 await asyncio.sleep(2)
-
                 submissions = []
 
                 for subreddit_name in subreddit_names:
@@ -276,22 +276,29 @@ class Bot:
                         submissions.append(submission)
 
                 for submission in submissions:
+                    if limit_reached:
+                        break
+
                     await asyncio.sleep(1)
                     await submission.load()
-
-                    await submission.comments.replace_more(limit=None)
+                    await submission.comments.replace_more(limit=0)
 
                     for comment in submission.comments.list():
                         if comment.id not in processed_comment_ids and comment.body not in configs.FORBIDDEN_COMMENTS:
                             all_potential_source_comments.append(comment)
                             processed_comment_ids.add(comment.id)
+                            if len(all_potential_source_comments) > 1000:
+                                limit_reached = True
+                                break
+                if limit_reached:
+                    break
 
             log.info(f"Collected {len(all_potential_source_comments)} potential source comments.")
-
             all_replies = []
 
             for source_comment in all_potential_source_comments:
                 await asyncio.sleep(1)
+
                 try:
                     for reply in source_comment.replies:
                         if reply.body not in configs.FORBIDDEN_COMMENTS:
@@ -312,7 +319,6 @@ class Bot:
 
             if best_reply_found:
                 log.info(f"Highest-rated reply found: '{best_reply_found.id}' with score {best_reply_found.score}")
-
                 log.info(f"URL: https://www.reddit.com{best_reply_found.permalink}")
                 bot_comment = await original_comment.reply(best_reply_found.body)
                 log.info(f"Reply sent to comment with ID '{mention.id}'.")
