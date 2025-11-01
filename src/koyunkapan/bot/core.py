@@ -324,7 +324,7 @@ class Bot:
             if best_reply_found:
                 log.info(f"Highest-rated reply found: '{best_reply_found.id}' with score {best_reply_found.score}")
                 log.info(f"URL: https://www.reddit.com{best_reply_found.permalink}")
-                bot_comment = await original_comment.reply(best_reply_found.body)
+                bot_comment = await mention.reply(best_reply_found.body)
                 log.info(f"Reply sent to comment with ID '{mention.id}'.")
                 subreddit_name = original_comment.subreddit.display_name
                 subreddit_obj, created = await models.Subreddit.get_or_create(name=subreddit_name)
