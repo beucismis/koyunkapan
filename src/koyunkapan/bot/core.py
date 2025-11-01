@@ -6,7 +6,7 @@ import warnings
 import asyncpraw
 from asyncpraw.models import Comment, Message, Submission
 from asyncprawcore import ServerError
-from asyncprawcore.exceptions import ClientException
+from asyncprawcore.exceptions import RequestException
 
 from . import configs, database, models, utils
 from .logger import Logger
@@ -298,7 +298,7 @@ class Bot:
                             if reply.body not in configs.FORBIDDEN_COMMENTS:
                                 all_replies.append(reply)
 
-                    except ClientException as e:
+                    except RequestException as e:
                         log.error(f"Error processing source comment {source_comment.id} for replies: {e}")
 
                 all_replies.sort(key=lambda r: r.score, reverse=True)
