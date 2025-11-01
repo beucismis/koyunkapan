@@ -240,104 +240,101 @@ class Bot:
         await self.submission_comment(submission, best_comments)
         log.info("--- Process Completed ---")
 
-        async def reply_to_mention(self, mention: Message) -> bool:
-            log.info(f"New reply request received: {mention.id}")
+    async def reply_to_mention(self, mention: Message) -> bool:
+        log.info(f"New reply request received: {mention.id}")
 
-            try:
-                if not mention.parent_id.startswith("t1_"):
-                    log.warning(f"Parent of mention {mention.id} is not a comment, skipping.")
-                    return False
-
-                original_comment = await self.reddit.comment(mention.parent_id)
-                await original_comment.load()
-                keywords = original_comment.body.split()
-
-                if not keywords:
-                    log.warning("Comment to reply to is empty.")
-                    return False
-
-                search_queries = utils.get_keyword_combinations(keywords)
-                log.info(f"{len(search_queries)} different search queries created.")
-                subreddit_names = await models.Subreddit.all().values_list("name", flat=True)
-                all_potential_source_comments = []
-                processed_comment_ids = {original_comment.id}
-
-                for i, query in enumerate(search_queries):
-                    log.info(f"Search {i + 1}/{len(search_queries)}: '{query}'")
-
-                    submissions = []
-
-                    for subreddit_name in subreddit_names:
-                        subreddit = await self.reddit.subreddit(subreddit_name)
-
-                        async for submission in subreddit.search(query, limit=configs.POST_LIMIT):
-                            submissions.append(submission)
-
-                    for submission in submissions:
-                        await submission.load()
-
-                        await submission.comments.replace_more(limit=None)
-
-                        for comment in submission.comments.list():
-                            if (
-                                comment.id not in processed_comment_ids
-                                and comment.body not in configs.FORBIDDEN_COMMENTS
-                            ):
-                                all_potential_source_comments.append(comment)
-                                processed_comment_ids.add(comment.id)
-
-                log.info(f"Collected {len(all_potential_source_comments)} potential source comments.")
-
-                all_replies = []
-
-                for source_comment in all_potential_source_comments:
-                    try:
-                        await source_comment.refresh()
-
-                        for reply in source_comment.replies:
-                            if reply.body not in configs.FORBIDDEN_COMMENTS:
-                                all_replies.append(reply)
-
-                    except RequestException as e:
-                        log.error(f"Error processing source comment {source_comment.id} for replies: {e}")
-
-                all_replies.sort(key=lambda r: r.score, reverse=True)
-                best_reply_found = None
-
-                for reply in all_replies:
-                    is_used = await models.Reply.filter(text=reply.body).exists()
-
-                    if not is_used:
-                        best_reply_found = reply
-                        break
-
-                if best_reply_found:
-                    log.info(f"Highest-rated reply found: '{best_reply_found.id}' with score {best_reply_found.score}")
-
-                    log.info(f"URL: https://www.reddit.com{best_reply_found.permalink}")
-                    bot_comment = await original_comment.reply(best_reply_found.body)
-                    log.info(f"Reply sent to comment with ID '{mention.id}'.")
-                    subreddit_name = original_comment.subreddit.display_name
-                    subreddit_obj, created = await models.Subreddit.get_or_create(name=subreddit_name)
-
-                    await models.Reply.create(
-                        text=best_reply_found.body,
-                        submission_id=original_comment.submission.id,
-                        comment_id=bot_comment.id,
-                        reference_submission_id=best_reply_found.submission.id,
-                        reference_comment_id=best_reply_found.id,
-                        reference_author=str(best_reply_found.author),
-                        subreddit=subreddit_obj,
-                    )
-                    return True
-
-                else:
-                    log.warning("No suitable reply found in any search results.")
-                    return False
-
-            except Exception as e:
-                log.error(f"An unexpected error occurred in reply_to_mention for mention {mention.id}: {e}")
+        try:
+            if not mention.parent_id.startswith("t1_"):
+                log.warning(f"Parent of mention {mention.id} is not a comment, skipping.")
                 return False
+
+            original_comment = await self.reddit.comment(mention.parent_id)
+            await original_comment.load()
+            keywords = original_comment.body.split()
+
+            if not keywords:
+                log.warning("Comment to reply to is empty.")
+                return False
+
+            search_queries = utils.get_keyword_combinations(keywords)
+            log.info(f"{len(search_queries)} different search queries created.")
+            subreddit_names = await models.Subreddit.all().values_list("name", flat=True)
+            all_potential_source_comments = []
+            processed_comment_ids = {original_comment.id}
+
+            for i, query in enumerate(search_queries):
+                log.info(f"Search {i + 1}/{len(search_queries)}: '{query}'")
+
+                submissions = []
+
+                for subreddit_name in subreddit_names:
+                    subreddit = await self.reddit.subreddit(subreddit_name)
+
+                    async for submission in subreddit.search(query, limit=configs.POST_LIMIT):
+                        submissions.append(submission)
+
+                for submission in submissions:
+                    await submission.load()
+
+                    await submission.comments.replace_more(limit=None)
+
+                    for comment in submission.comments.list():
+                        if comment.id not in processed_comment_ids and comment.body not in configs.FORBIDDEN_COMMENTS:
+                            all_potential_source_comments.append(comment)
+                            processed_comment_ids.add(comment.id)
+
+            log.info(f"Collected {len(all_potential_source_comments)} potential source comments.")
+
+            all_replies = []
+
+            for source_comment in all_potential_source_comments:
+                try:
+                    await source_comment.refresh()
+
+                    for reply in source_comment.replies:
+                        if reply.body not in configs.FORBIDDEN_COMMENTS:
+                            all_replies.append(reply)
+
+                except RequestException as e:
+                    log.error(f"Error processing source comment {source_comment.id} for replies: {e}")
+
+            all_replies.sort(key=lambda r: r.score, reverse=True)
+            best_reply_found = None
+
+            for reply in all_replies:
+                is_used = await models.Reply.filter(text=reply.body).exists()
+
+                if not is_used:
+                    best_reply_found = reply
+                    break
+
+            if best_reply_found:
+                log.info(f"Highest-rated reply found: '{best_reply_found.id}' with score {best_reply_found.score}")
+
+                log.info(f"URL: https://www.reddit.com{best_reply_found.permalink}")
+                bot_comment = await original_comment.reply(best_reply_found.body)
+                log.info(f"Reply sent to comment with ID '{mention.id}'.")
+                subreddit_name = original_comment.subreddit.display_name
+                subreddit_obj, created = await models.Subreddit.get_or_create(name=subreddit_name)
+
+                await models.Reply.create(
+                    text=best_reply_found.body,
+                    submission_id=original_comment.submission.id,
+                    comment_id=bot_comment.id,
+                    reference_submission_id=best_reply_found.submission.id,
+                    reference_comment_id=best_reply_found.id,
+                    reference_author=str(best_reply_found.author),
+                    subreddit=subreddit_obj,
+                )
+                return True
+
+            else:
+                log.warning("No suitable reply found in any search results.")
+                return False
+
+        except Exception as e:
+            log.error(f"An unexpected error occurred in reply_to_mention for mention {mention.id}: {e}")
+            return False
 
 
 async def check_inbox(bot: Bot) -> None:
