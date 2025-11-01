@@ -283,7 +283,6 @@ class Bot:
                     await asyncio.sleep(1)
                     await submission.load()
                     await submission.comments.replace_more(limit=None)
-                    log.info("Iterating through comments...")
 
                     for comment in submission.comments.list():
                         if comment.id not in processed_comment_ids and comment.body not in configs.FORBIDDEN_COMMENTS:
