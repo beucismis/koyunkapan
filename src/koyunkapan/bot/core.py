@@ -189,32 +189,35 @@ class Bot:
 
         comment_text = best_comment.body.splitlines()[0].lower()
 
-        if comment_text:
+        if not comment_text.strip():
+            log.warning(f"Comment text for submission '{submission.id}' is empty or whitespace, skipping.")
+            return
+
+        try:
+            bot_comment = await submission.reply(comment_text)
+
             try:
-                bot_comment = await submission.reply(comment_text)
+                flair = await models.Flair.get(fid=submission.link_flair_template_id, subreddit=self.subreddit_obj)
+            except Exception:
+                flair = None
 
-                try:
-                    flair = await models.Flair.get(fid=submission.link_flair_template_id, subreddit=self.subreddit_obj)
-                except Exception:
-                    flair = None
+            await models.Reply.create(
+                text=comment_text,
+                submission_id=submission.id,
+                comment_id=bot_comment.id,
+                reference_submission_id=best_comment.submission.id,
+                reference_comment_id=best_comment.id,
+                reference_author=str(best_comment.author),
+                flair=flair,
+                subreddit=self.subreddit_obj,
+            )
 
-                await models.Reply.create(
-                    text=comment_text,
-                    submission_id=submission.id,
-                    comment_id=bot_comment.id,
-                    reference_submission_id=best_comment.submission.id,
-                    reference_comment_id=best_comment.id,
-                    reference_author=str(best_comment.author),
-                    flair=flair,
-                    subreddit=self.subreddit_obj,
-                )
+            log.info(f"Successfully commented on post with ID '{submission.id}'.")
 
-                log.info(f"Successfully commented on post with ID '{submission.id}'.")
-
-            except asyncpraw.exceptions.APIException as e:
-                log.error(f"An API error occurred while commenting: {e}")
-            except Exception as e:
-                log.error(f"An unexpected error occurred while commenting: {e}")
+        except asyncpraw.exceptions.APIException as e:
+            log.error(f"An API error occurred while commenting: {e}")
+        except Exception as e:
+            log.error(f"An unexpected error occurred while commenting: {e}")
 
     async def process_post(self, submission_id: str | None = None) -> None:
         if submission_id:
@@ -324,6 +327,11 @@ class Bot:
             if best_reply_found:
                 log.info(f"Highest-rated reply found: '{best_reply_found.id}' with score {best_reply_found.score}")
                 log.info(f"URL: https://www.reddit.com{best_reply_found.permalink}")
+
+                if not best_reply_found.body.strip():
+                    log.warning(f"Reply text for mention '{mention.id}' is empty or whitespace, skipping.")
+                    return False
+
                 bot_comment = await mention.reply(best_reply_found.body)
                 log.info(f"Reply sent to comment with ID '{mention.id}'.")
                 subreddit_name = original_comment.subreddit.display_name
