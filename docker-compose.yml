@@ -1,8 +1,0 @@
-version: "3.8"
-services:
-  app:
-    build: .
-    image: koyunkapan
-    container_name: koyunkapan
-    ports:
-      - "3131:5000"
