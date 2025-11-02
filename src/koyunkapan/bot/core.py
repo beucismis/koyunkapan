@@ -22,8 +22,8 @@ class Bot:
         self.reddit = reddit_instance
         self.posts, self.comments, self.keywords = [], [], []
 
-    async def setup(self) -> None:
-        subreddit_name = random.choice(configs.RANDOM_POST_SUBREDDIT_NAMES)
+    async def setup(self, subreddit_names: list[str]) -> None:
+        subreddit_name = random.choice(subreddit_names)
         self.subreddit = await self.reddit.subreddit(subreddit_name)
         self.subreddit_obj, created = await models.Subreddit.get_or_create(name=subreddit_name)
 
@@ -337,10 +337,9 @@ class Bot:
             return
 
         flair_id = None
-
-        if target_subreddit_name == "KGBTR":
+        if target_subreddit_name.lower() == "kgbtr":
             async for flair in target_subreddit.flair.link_templates:
-                if flair["text"] == "Galerimden Fotoğraflar/Videolar":
+                if flair["text"].lower() == "galerimden fotoğraflar/videolar":
                     flair_id = flair["id"]
                     break
         else:
@@ -492,7 +491,7 @@ async def check_inbox(bot: Bot) -> None:
 
 async def run_comment_processor(bot: Bot) -> None:
     while True:
-        await bot.setup()
+        await bot.setup(configs.SUBREDDIT_NAMES)
         current_hour = time.strftime("%H")
 
         if current_hour in configs.WORKING_HOURS:
@@ -514,7 +513,7 @@ async def run_comment_processor(bot: Bot) -> None:
 
 async def run_post_submission_processor(bot: Bot) -> None:
     while True:
-        await bot.setup()
+        await bot.setup(configs.POST_SUBREDDIT_NAMES)
         current_hour = time.strftime("%H")
 
         if current_hour in configs.WORKING_HOURS:
