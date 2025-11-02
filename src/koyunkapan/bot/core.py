@@ -340,8 +340,14 @@ class Bot:
                     log.warning(f"Reply text for mention '{mention.id}' is empty or whitespace, skipping.")
                     return False
 
-                log.info(f"Replying to mention {mention.id} with: {best_reply_found.body}")
-                bot_comment = await mention.reply(best_reply_found.body)
+                comment_text = best_reply_found.body.strip()[:10000]
+
+                try:
+                    bot_comment = await mention.reply(comment_text)
+                except asyncpraw.exceptions.APIException as e:
+                    log.error(f"API error while replying to mention {mention.id}: {e}")
+                    return False
+
                 log.info(f"Reply sent to comment with ID '{mention.id}'.")
                 subreddit_name = original_comment.subreddit.display_name
                 subreddit_obj, created = await models.Subreddit.get_or_create(name=subreddit_name)
