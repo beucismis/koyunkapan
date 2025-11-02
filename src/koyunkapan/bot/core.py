@@ -138,10 +138,14 @@ class Bot:
                 continue
 
             for top_level_comment in submission.comments.list()[: configs.TOP_COMMENT_LIMIT]:
-                comment_text = top_level_comment.body.splitlines()[0].lower()
+                try:
+                    comment_text = top_level_comment.body.splitlines()[0].lower()
 
-                if comment_text not in configs.FORBIDDEN_COMMENTS and len(comment_text) > 0:
-                    comments.append(top_level_comment)
+                    if comment_text not in configs.FORBIDDEN_COMMENTS and len(comment_text) > 0:
+                        comments.append(top_level_comment)
+                except IndexError:
+                    log.warning(f"Comment '{top_level_comment.id}' has an empty body, skipping.")
+                    continue
 
         log.info(f"'{len(comments)}' similar comments collected.")
         return comments
@@ -176,12 +180,16 @@ class Bot:
 
         best_comment = None
         for comment in comments:
-            comment_text = comment.body.splitlines()[0].lower()
-            is_used = await models.Reply.filter(text=comment_text).exists()
+            try:
+                comment_text = comment.body.splitlines()[0].lower()
+                is_used = await models.Reply.filter(text=comment_text).exists()
 
-            if not is_used:
-                best_comment = comment
-                break
+                if not is_used:
+                    best_comment = comment
+                    break
+            except IndexError:
+                log.warning(f"Comment '{comment.id}' has an empty body, skipping.")
+                continue
 
         if not best_comment:
             log.warning(f"All suitable comments for submission '{submission.id}' have already been used.")
