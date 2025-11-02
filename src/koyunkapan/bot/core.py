@@ -22,8 +22,8 @@ class Bot:
         self.reddit = reddit_instance
         self.posts, self.comments, self.keywords = [], [], []
 
-    async def setup(self, subreddit_names: list[str]) -> None:
-        subreddit_name = random.choice(subreddit_names)
+    async def setup(self) -> None:
+        subreddit_name = random.choice(configs.SUBREDDIT_NAMES)
         self.subreddit = await self.reddit.subreddit(subreddit_name)
         self.subreddit_obj, created = await models.Subreddit.get_or_create(name=subreddit_name)
 
@@ -258,46 +258,6 @@ class Bot:
         await self.submission_comment(submission, best_comments)
         log.info("--- Process Completed ---")
 
-    async def reply_to_own_post_comments(self) -> None:
-        while True:
-            try:
-                user = await self.reddit.user.me()
-                submissions = user.submissions.new(limit=10)
-
-                async for submission in submissions:
-                    await submission.load()
-                    for comment in submission.comments.list():
-                        if comment.author != user and not await models.Reply.filter(comment_id=comment.id).exists():
-                            try:
-                                random_submission = await self.select_random_submission()
-                                if not random_submission:
-                                    continue
-
-                                random_comment = await self.select_random_comment(random_submission)
-                                if not random_comment:
-                                    continue
-
-                                bot_comment = await comment.reply(random_comment.body)
-                                await models.Reply.create(
-                                    text=random_comment.body,
-                                    submission_id=submission.id,
-                                    comment_id=bot_comment.id,
-                                    reference_submission_id=random_submission.id,
-                                    reference_comment_id=random_comment.id,
-                                    reference_author=str(random_comment.author),
-                                    subreddit=self.subreddit_obj,
-                                )
-                                log.info(f"Replied to comment '{comment.id}' on own post '{submission.id}'.")
-                            except asyncpraw.exceptions.APIException as e:
-                                log.error(f"An API error occurred while replying to comment: {e}")
-                            except Exception as e:
-                                log.error(f"An unexpected error occurred while replying to comment: {e}")
-
-            except Exception as e:
-                log.error(f"An error occurred while replying to own post comments: {e}")
-
-            await asyncio.sleep(configs.INBOX_CHECK_INTERVAL)
-
     async def select_random_comment(self, submission: Submission) -> Comment | None:
         comments = submission.comments.list()
         if not comments:
@@ -309,53 +269,6 @@ class Bot:
                 return comment
 
         return None
-
-    async def post_random_submission(self) -> None:
-        source_subreddit_name = random.choice(configs.RANDOM_POST_SUBREDDIT_NAMES)
-        self.subreddit = await self.reddit.subreddit(source_subreddit_name)
-        await self.fetch_new_submissions()
-        source_submission = await self.select_random_submission()
-
-        if not source_submission:
-            log.warning(f"No suitable submission found in subreddit '{source_subreddit_name}'.")
-            return
-
-        target_subreddit_name = random.choice(configs.POST_SUBREDDIT_NAMES)
-        target_subreddit = await self.reddit.subreddit(target_subreddit_name)
-        self.subreddit = target_subreddit
-        await self.fetch_new_submissions()
-        title_submission = await self.select_random_submission()
-
-        if not title_submission:
-            log.warning(f"No suitable submission found for title in subreddit '{target_subreddit_name}'.")
-            return
-
-        comment = await self.select_random_comment(title_submission)
-
-        if not comment or len(comment.body.splitlines()[0]) < 3:
-            log.warning(f"No suitable comment found for submission '{title_submission.id}'.")
-            return
-
-        flair_id = None
-        if target_subreddit_name.lower() == "kgbtr":
-            async for flair in target_subreddit.flair.link_templates:
-                if flair["text"].lower() == "galerimden fotoğraflar/videolar":
-                    flair_id = flair["id"]
-                    break
-        else:
-            flairs = [flair["id"] async for flair in target_subreddit.flair.link_templates]
-            flair_id = random.choice(flairs) if flairs else None
-
-        try:
-            new_submission = await source_submission.crosspost(
-                subreddit=target_subreddit, title=comment.body.splitlines()[0], flair_id=flair_id
-            )
-            log.info(f"Successfully crossposted to '{target_subreddit_name}' with ID '{new_submission.id}'.")
-
-        except asyncpraw.exceptions.APIException as e:
-            log.error(f"An API error occurred while posting: {e}")
-        except Exception as e:
-            log.error(f"An unexpected error occurred while posting: {e}")
 
     async def reply_to_mention(self, mention: Message) -> bool:
         log.info(f"New reply request received: {mention.id}")
@@ -491,7 +404,7 @@ async def check_inbox(bot: Bot) -> None:
 
 async def run_comment_processor(bot: Bot) -> None:
     while True:
-        await bot.setup(configs.SUBREDDIT_NAMES)
+        await bot.setup()
         current_hour = time.strftime("%H")
 
         if current_hour in configs.WORKING_HOURS:
@@ -500,28 +413,6 @@ async def run_comment_processor(bot: Bot) -> None:
                 await bot.process_post()
             except Exception as e:
                 log.error(f"An exception occurred during the main process: {e}")
-
-        else:
-            log.info(f"Outside working hours ({configs.WORKING_HOURS}). Bot is inactive.")
-
-        min_sleep_seconds, max_sleep_seconds = configs.MIN_SLEEP_MINUTES * 60, configs.MAX_SLEEP_MINUTES * 60
-        sleep_duration = random.randint(min_sleep_seconds, max_sleep_seconds)
-        minutes, seconds = divmod(sleep_duration, 60)
-        log.info(f"Waiting for {minutes} minutes and {seconds} seconds...")
-        await asyncio.sleep(sleep_duration)
-
-
-async def run_post_submission_processor(bot: Bot) -> None:
-    while True:
-        await bot.setup(configs.POST_SUBREDDIT_NAMES)
-        current_hour = time.strftime("%H")
-
-        if current_hour in configs.WORKING_HOURS:
-            try:
-                log.info("Posting a random submission...")
-                await bot.post_random_submission()
-            except Exception as e:
-                log.error(f"An exception occurred during the post submission process: {e}")
 
         else:
             log.info(f"Outside working hours ({configs.WORKING_HOURS}). Bot is inactive.")
@@ -555,13 +446,9 @@ async def main() -> None:
         bot = Bot(reddit)
 
         inbox_task = asyncio.create_task(check_inbox(bot))
-        comment_processor_task = asyncio.create_task(run_comment_processor(bot))
-        post_submission_processor_task = asyncio.create_task(run_post_submission_processor(bot))
-        reply_to_own_post_comments_task = asyncio.create_task(bot.reply_to_own_post_comments())
+        processor_task = asyncio.create_task(run_comment_processor(bot))
 
-        await asyncio.gather(
-            inbox_task, comment_processor_task, post_submission_processor_task, reply_to_own_post_comments_task
-        )
+        await asyncio.gather(inbox_task, processor_task)
 
     await database.close()
 

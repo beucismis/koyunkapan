@@ -30,17 +30,7 @@ SUBREDDIT_NAMES = [
     "BAYIRDOMUZLARI",
     "CursedYemekler",
 ]
-POST_SUBREDDIT_NAMES = ["KGBTR"]
-RANDOM_POST_SUBREDDIT_NAMES = [
-    "oddlysatisfying",
-    "nextfuckinglevel",
-    "interestingasfuck",
-    "WatchPeopleDieInside",
-    "BeAmazed",
-    "blackmagicfuckery",
-    "Damnthatsinteresting",
-    "PublicFreakout",
-]
+
 
 FORBIDDEN_FLAIR = "Ciddi"
 FORBIDDEN_COMMENTS = ("[removed]", "[deleted]", "", " ", None)
