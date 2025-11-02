@@ -3,7 +3,6 @@ from typing import Union
 
 import flask
 import werkzeug
-from tortoise.functions import Count
 
 from koyunkapan.bot import configs, models
 
@@ -22,29 +21,9 @@ async def index() -> Union[str, werkzeug.wrappers.Response]:
     except Exception as e:
         logs = [f"Error reading log file: {e}"]
 
-    total_replies = await models.Reply.all().count()
-    most_active_subreddits = (
-        await models.Reply.all()
-        .annotate(count=Count("id"))
-        .group_by("subreddit__name")
-        .order_by("-count")
-        .limit(10)
-        .values("subreddit__name", "count")
-    )
-    popular_replies = (
-        await models.Reply.all()
-        .annotate(count=Count("id"))
-        .group_by("text")
-        .order_by("-count")
-        .limit(10)
-        .values("text", "count")
-    )
-
     return flask.render_template(
         "index.html",
-        replies=replies,
+        replies=replies[-15:],
+        total_replies=len(replies),
         logs=logs[-100:],
-        total_replies=total_replies,
-        most_active_subreddits=most_active_subreddits,
-        popular_replies=popular_replies,
     )

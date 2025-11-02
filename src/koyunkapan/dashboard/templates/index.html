@@ -2,31 +2,7 @@
 {% block title %}KoyunKapan Dashboard{% endblock %}
 {% block main %}
     <div class="data-container">
-        <div class="data-title">Statics</div>
-        <div class="logs">
-            <p><b>Total Comment:</b> {{ total_replies }}</p>
-            <br>
-            <b>Top Subreddits</b>
-            <table>
-                {% for subreddit in most_active_subreddits %}
-                <tr>
-                    <td>r/{{ subreddit.subreddit__name }}</td>
-                    <td>{{ subreddit.count }}</td>
-                </tr>
-                {% endfor %}
-            </table>
-            <br>
-            <b>Most Popular Comments</b>
-            <table>
-                {% for reply in popular_replies %}
-                <tr>
-                    <td>{{ reply.text }}</td>
-                    <td>{{ reply.count }}</td>
-                </tr>
-                {% endfor %}
-            </table>
-        </div>
-        <div class="data-title">Last 15 Reply (Total: {{ replies|length }})</div>
+        <div class="data-title">Last 15 Reply (Total: {{ total_replies }})</div>
         <div class="logs">
             {% for reply in replies[-15:] %}
                 {% set submission_url = "https://www.reddit.com/r/" + reply.subreddit__name + "/comments/" + reply.submission_id %}
