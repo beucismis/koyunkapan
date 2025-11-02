@@ -1,4 +1,6 @@
 import asyncio
+import configparser
+import os
 import random
 import time
 import warnings
@@ -411,7 +413,17 @@ async def run_post_processor(bot: Bot) -> None:
 
 
 async def main() -> None:
-    async with asyncpraw.Reddit(site_name="bot", config_interpolation="basic") as reddit:
+    config_path = os.path.join(configs.DATA_DIR, "praw.ini")
+    config = configparser.ConfigParser()
+    config.read(config_path)
+
+    async with asyncpraw.Reddit(
+        client_id=config.get("bot", "client_id"),
+        client_secret=config.get("bot", "client_secret"),
+        user_agent=config.get("bot", "user_agent"),
+        username=config.get("bot", "username"),
+        password=config.get("bot", "password"),
+    ) as reddit:
         if reddit.read_only:
             log.warnings("Connected in read-only mode. Check praw.ini configuration.")
             return
