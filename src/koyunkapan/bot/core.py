@@ -340,6 +340,7 @@ class Bot:
                     log.warning(f"Reply text for mention '{mention.id}' is empty or whitespace, skipping.")
                     return False
 
+                log.info(f"Replying to mention {mention.id} with: {best_reply_found.body}")
                 bot_comment = await mention.reply(best_reply_found.body)
                 log.info(f"Reply sent to comment with ID '{mention.id}'.")
                 subreddit_name = original_comment.subreddit.display_name
