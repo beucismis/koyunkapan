@@ -311,33 +311,47 @@ class Bot:
         return None
 
     async def post_random_submission(self) -> None:
-        subreddit_name = random.choice(configs.POST_SUBREDDIT_NAMES)
-        subreddit = await self.reddit.subreddit(subreddit_name)
-
+        source_subreddit_name = random.choice(configs.RANDOM_POST_SUBREDDIT_NAMES)
+        self.subreddit = await self.reddit.subreddit(source_subreddit_name)
         await self.fetch_new_submissions()
-        submission = await self.select_random_submission()
+        source_submission = await self.select_random_submission()
 
-        if not submission:
-            log.warning("No suitable submission found for posting.")
+        if not source_submission:
+            log.warning(f"No suitable submission found in subreddit '{source_subreddit_name}'.")
             return
 
-        self.subreddit = subreddit
+        target_subreddit_name = random.choice(configs.POST_SUBREDDIT_NAMES)
+        target_subreddit = await self.reddit.subreddit(target_subreddit_name)
+        self.subreddit = target_subreddit
         await self.fetch_new_submissions()
         title_submission = await self.select_random_submission()
 
         if not title_submission:
-            log.warning(f"No suitable submission found for title in subreddit '{subreddit_name}'.")
+            log.warning(f"No suitable submission found for title in subreddit '{target_subreddit_name}'.")
             return
 
         comment = await self.select_random_comment(title_submission)
 
-        if not comment:
+        if not comment or len(comment.body.splitlines()[0]) < 3:
             log.warning(f"No suitable comment found for submission '{title_submission.id}'.")
             return
 
+        flair_id = None
+
+        if target_subreddit_name == "KGBTR":
+            async for flair in target_subreddit.flair.link_templates:
+                if flair["text"] == "Galerimden Fotoğraflar/Videolar":
+                    flair_id = flair["id"]
+                    break
+        else:
+            flairs = [flair["id"] async for flair in target_subreddit.flair.link_templates]
+            flair_id = random.choice(flairs) if flairs else None
+
         try:
-            new_submission = await submission.crosspost(subreddit=subreddit, title=comment.body.splitlines()[0])
-            log.info(f"Successfully crossposted to '{subreddit_name}' with ID '{new_submission.id}'.")
+            new_submission = await source_submission.crosspost(
+                subreddit=target_subreddit, title=comment.body.splitlines()[0], flair_id=flair_id
+            )
+            log.info(f"Successfully crossposted to '{target_subreddit_name}' with ID '{new_submission.id}'.")
 
         except asyncpraw.exceptions.APIException as e:
             log.error(f"An API error occurred while posting: {e}")
