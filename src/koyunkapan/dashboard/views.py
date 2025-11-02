@@ -1,11 +1,10 @@
 import asyncio
-import re
 from collections import deque
-from datetime import datetime, timezone
 from typing import Union
 
 import flask
 import werkzeug
+
 from koyunkapan.bot import configs, models
 
 from . import main
@@ -23,44 +22,48 @@ async def index() -> Union[str, werkzeug.wrappers.Response]:
     except Exception as e:
         logs = [f"Error reading log file: {e}"]
 
-    uptime_string = "N/A"
+    bot_status = "Down"
+    bot_uptime = "N/A"
 
     try:
         process = await asyncio.create_subprocess_exec(
-            "systemctl",
-            "--user",
-            "status",
-            "koyunkapan-bot.service",
+            "pgrep",
+            "-f",
+            "python3 -m koyunkapan.bot.core",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await process.communicate()
 
         if stdout:
-            output = stdout.decode()
-            output_lines = output.splitlines()
-            service_output = "\n".join(output_lines[:10])
+            pid = stdout.decode().strip()
+            bot_status = "Running"
 
-            match = re.search(r"since (.*?);", output)
-            if match:
-                start_time_str = match.group(1)
-                start_time = datetime.strptime(start_time_str.strip(), "%a %Y-%m-%d %H:%M:%S %Z")
-                start_time = start_time.replace(tzinfo=timezone.utc)
+            process = await asyncio.create_subprocess_exec(
+                "ps",
+                "-p",
+                pid,
+                "-o",
+                "etimes=",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await process.communicate()
 
-                uptime_delta = datetime.now(timezone.utc) - start_time
-
-                days = uptime_delta.days
-                hours, remainder = divmod(uptime_delta.seconds, 3600)
+            if stdout:
+                elapsed_seconds = int(stdout.decode().strip())
+                days, remainder = divmod(elapsed_seconds, 86400)
+                hours, remainder = divmod(remainder, 3600)
                 minutes, _ = divmod(remainder, 60)
-
-                uptime_string = f"{days} days, {hours} hours, {minutes} minutes"
-        else:
-            service_output = stderr.decode()
+                bot_uptime = f"{days} days, {hours} hours, {minutes} minutes"
 
     except Exception as e:
-        service_output = f"Error fetching status: {e}"
-        uptime_string = "Error"
+        bot_status = f"Error: {e}"
 
     return flask.render_template(
-        "index.html", replies=replies, logs=logs[-100:], service_output=service_output, uptime=uptime_string
+        "index.html",
+        replies=replies,
+        logs=logs[-100:],
+        bot_status=bot_status,
+        bot_uptime=bot_uptime,
     )
