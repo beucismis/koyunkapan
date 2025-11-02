@@ -26,17 +26,16 @@ async def index() -> Union[str, werkzeug.wrappers.Response]:
     bot_uptime = "N/A"
 
     try:
-        process = await asyncio.create_subprocess_exec(
-            "pgrep",
-            "-f",
-            "python3 -m koyunkapan.bot.core",
+        command = "ps -ef | grep '[p]ython3 -m koyunkapan.bot.core'"
+        process = await asyncio.create_subprocess_shell(
+            command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await process.communicate()
 
         if stdout:
-            pid = stdout.decode().strip()
+            pid = stdout.decode().strip().split()[1]
             bot_status = "Running"
 
             process = await asyncio.create_subprocess_exec(
