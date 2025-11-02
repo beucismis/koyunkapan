@@ -20,19 +20,13 @@ python3 -m koyunkapan.bot.core
 flask --app koyunkapan.dashboard.main:app run --port 3131 --debug
 ```
 
-## Service
-
-Check `[Service] > Environment` before running.
+## Running with Docker
 
 ```
-cp koyunkapan-bot.service koyunkapan-dashboard.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-
-systemctl --user enable koyunkapan-bot.service
-systemctl --user enable koyunkapan-dashboard.service
-
-systemctl --user start koyunkapan-bot.service
-systemctl --user start koyunkapan-dashboard.service
+git clone https://github.com/beucismis/koyunkapan
+cd koyunkapan/
+docker build -t koyunkapan .
+docker run -d -p 3131:5000 -v ~/data:/data --name koyunkapan koyunkapan
 ```
 
 ## License
