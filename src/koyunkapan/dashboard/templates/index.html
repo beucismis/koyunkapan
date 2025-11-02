@@ -4,7 +4,7 @@
     <div class="data-container">
         <div class="data-title">Bot Uptime</div>
         <div class="logs">
-            <p>{{ uptime }}</p>
+            <p>{{ bot_uptime }}</p>
         </div>
         <div class="data-title">Last 10 Reply (Total: {{ replies|length }})</div>
         <div class="logs">
@@ -20,9 +20,9 @@
         <div class="logs">
             {% for line in logs %}<div>{{ line.strip() |e }}</div>{% endfor %}
         </div>
-        <div class="data-title">Bot Service Status</div>
+        <div class="data-title">Bot Status</div>
         <div class="logs">
-            <pre>{{ service_output }}</pre>
+            <p>{{ bot_status }}</p>
         </div>
     </div>
 {% endblock %}
