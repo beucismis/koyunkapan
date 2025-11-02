@@ -1,9 +1,9 @@
-import asyncio
 from collections import deque
 from typing import Union
 
 import flask
 import werkzeug
+from tortoise.functions import Count
 
 from koyunkapan.bot import configs, models
 
@@ -22,47 +22,29 @@ async def index() -> Union[str, werkzeug.wrappers.Response]:
     except Exception as e:
         logs = [f"Error reading log file: {e}"]
 
-    bot_status = "Down"
-    bot_uptime = "N/A"
-
-    try:
-        command = "ps -ef | grep '[p]ython3 -m koyunkapan.bot.core'"
-        process = await asyncio.create_subprocess_shell(
-            command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await process.communicate()
-
-        if stdout:
-            pid = stdout.decode().strip().split()[1]
-            bot_status = "Running"
-
-            process = await asyncio.create_subprocess_exec(
-                "ps",
-                "-p",
-                pid,
-                "-o",
-                "etimes=",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await process.communicate()
-
-            if stdout:
-                elapsed_seconds = int(stdout.decode().strip())
-                days, remainder = divmod(elapsed_seconds, 86400)
-                hours, remainder = divmod(remainder, 3600)
-                minutes, _ = divmod(remainder, 60)
-                bot_uptime = f"{days} days, {hours} hours, {minutes} minutes"
-
-    except Exception as e:
-        bot_status = f"Error: {e}"
+    total_replies = await models.Reply.all().count()
+    most_active_subreddits = (
+        await models.Reply.all()
+        .annotate(count=Count("id"))
+        .group_by("subreddit__name")
+        .order_by("-count")
+        .limit(10)
+        .values("subreddit__name", "count")
+    )
+    popular_replies = (
+        await models.Reply.all()
+        .annotate(count=Count("id"))
+        .group_by("text")
+        .order_by("-count")
+        .limit(10)
+        .values("text", "count")
+    )
 
     return flask.render_template(
         "index.html",
         replies=replies,
         logs=logs[-100:],
-        bot_status=bot_status,
-        bot_uptime=bot_uptime,
+        total_replies=total_replies,
+        most_active_subreddits=most_active_subreddits,
+        popular_replies=popular_replies,
     )
