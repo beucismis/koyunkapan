@@ -27,7 +27,6 @@ git clone https://github.com/beucismis/koyunkapan
 cd koyunkapan/
 docker build -t koyunkapan .
 docker run -d -p 3131:5000 -v ~/data:/data --name koyunkapan koyunkapan
-docker-compose up --build -d
 ```
 
 ## License
