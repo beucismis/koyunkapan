@@ -31,6 +31,5 @@ SUBREDDIT_NAMES = [
     "CursedYemekler",
 ]
 
-
 FORBIDDEN_FLAIR = "Ciddi"
 FORBIDDEN_COMMENTS = ("[removed]", "[deleted]", "", " ", None)
