@@ -7,8 +7,10 @@ def get_keyword_combinations(keywords: list[str]) -> list[str]:
     if not keywords:
         return []
 
+    keywords = keywords[:5]
     all_combinations = []
-    for i in range(1, len(keywords) + 1):
+
+    for i in range(1, min(len(keywords) + 1, 4)):
         all_combinations.extend(itertools.combinations(keywords, i))
 
     output_queries = [" AND ".join(f'"{k}"' for k in combo) for combo in all_combinations]
