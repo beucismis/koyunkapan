@@ -26,12 +26,6 @@ class Bot:
         subreddit_name = random.choice(configs.SUBREDDIT_NAMES)
         self.subreddit = await self.reddit.subreddit(subreddit_name)
         self.subreddit_obj, created = await models.Subreddit.get_or_create(name=subreddit_name)
-
-        if created:
-            log.info(f"Subreddit '{subreddit_name}' database created.")
-        else:
-            log.info(f"Subreddit '{subreddit_name}' database found.")
-
         self.flairs = await models.Flair.filter(subreddit=self.subreddit_obj).values_list("fid", flat=True)
         self.replies = await models.Reply.filter(subreddit=self.subreddit_obj).values_list("submission_id", flat=True)
 
@@ -39,8 +33,6 @@ class Bot:
             await self.init_flair_replies()
 
     async def init_flair_replies(self) -> None:
-        log.info("Creating reply database for flairs...")
-
         try:
             new_flairs = []
             existing_flair_fids = await models.Flair.filter(subreddit=self.subreddit_obj).values_list("fid", flat=True)
@@ -121,6 +113,7 @@ class Bot:
 
             async for post in self.subreddit.search(query, limit=configs.SEARCH_LIMIT):
                 results.append(post)
+
             return results
 
         except ServerError as e:
@@ -181,6 +174,7 @@ class Bot:
             return
 
         best_comment = None
+
         for comment in comments:
             try:
                 comment_text = comment.body.splitlines()[0].lower()
@@ -243,8 +237,6 @@ class Bot:
             return
 
         log.info(f"--- Process Started: '{submission.id}' ---")
-        log.info(f"Title: '{submission.title}'")
-        log.info(f"URL: https://reddit.com{submission.permalink}")
         await self.extract_keywords_from_submission(submission)
         log.info("Searching for similar submissions...")
         similar_submissions = await self.find_similar_submissions(submission.title, submission.over_18)
@@ -260,13 +252,92 @@ class Bot:
 
     async def select_random_comment(self, submission: Submission) -> Comment | None:
         comments = submission.comments.list()
+
         if not comments:
             return None
 
         for _ in range(configs.RANDOM_POST_COUNT):
             comment = random.choice(comments)
+
             if comment.body and comment.body.strip() and comment.body not in configs.FORBIDDEN_COMMENTS:
                 return comment
+
+        return None
+
+    async def _search_submissions(self, query: str, subreddit_names: list[str]) -> list[Submission]:
+        submissions = []
+
+        async def search_in_subreddit(subreddit_name):
+            subreddit = await self.reddit.subreddit(subreddit_name)
+
+            try:
+                async for submission in subreddit.search(query, limit=configs.POST_LIMIT):
+                    submissions.append(submission)
+            except Exception as e:
+                log.error(f"Error searching in subreddit {subreddit_name}: {e}")
+
+        await asyncio.gather(*(search_in_subreddit(name) for name in subreddit_names))
+        return submissions
+
+    async def _collect_source_comments(
+        self, submissions: list[Submission], processed_comment_ids: set
+    ) -> list[Comment]:
+        all_potential_source_comments = []
+        limit_reached = False
+
+        async def process_submission(submission):
+            nonlocal limit_reached
+
+            if limit_reached:
+                return
+
+            try:
+                await submission.load()
+                await submission.comments.replace_more(limit=0)
+
+                for comment in submission.comments.list():
+                    if limit_reached:
+                        break
+
+                    if comment.id not in processed_comment_ids and comment.body not in configs.FORBIDDEN_COMMENTS:
+                        all_potential_source_comments.append(comment)
+                        processed_comment_ids.add(comment.id)
+
+                        if len(all_potential_source_comments) > 1000:
+                            limit_reached = True
+            except Exception as e:
+                log.error(f"Error processing submission {submission.id}: {e}")
+
+        await asyncio.gather(*(process_submission(sub) for sub in submissions))
+        return all_potential_source_comments
+
+    async def _collect_replies(self, source_comments: list[Comment]) -> list[Comment]:
+        all_replies = []
+
+        async def process_comment(source_comment):
+            try:
+                await source_comment.load()
+
+                for reply in source_comment.replies:
+                    if reply.body and reply.body.strip() and reply.body not in configs.FORBIDDEN_COMMENTS:
+                        all_replies.append(reply)
+            except RequestException as e:
+                log.error(f"Error processing source comment {source_comment.id} for replies: {e}")
+
+        await asyncio.gather(*(process_comment(comment) for comment in source_comments))
+        return all_replies
+
+    async def _find_best_reply(self, replies: list[Comment]) -> Comment | None:
+        if not replies:
+            return None
+
+        replies.sort(key=lambda r: r.score, reverse=True)
+
+        for reply in replies:
+            is_used = await models.Reply.filter(text=reply.body).exists()
+
+            if not is_used:
+                return reply
 
         return None
 
@@ -291,70 +362,28 @@ class Bot:
             subreddit_names = await models.Subreddit.all().values_list("name", flat=True)
             all_potential_source_comments = []
             processed_comment_ids = {original_comment.id}
-            limit_reached = False
 
             for i, query in enumerate(search_queries):
-                log.info(f"Search {i + 1}/{len(search_queries)}: '{query}'")
-                await asyncio.sleep(2)
-                submissions = []
+                submissions = await self._search_submissions(query, subreddit_names)
+                source_comments = await self._collect_source_comments(submissions, processed_comment_ids)
+                all_potential_source_comments.extend(source_comments)
 
-                for subreddit_name in subreddit_names:
-                    subreddit = await self.reddit.subreddit(subreddit_name)
-
-                    async for submission in subreddit.search(query, limit=configs.POST_LIMIT):
-                        submissions.append(submission)
-
-                for submission in submissions:
-                    if limit_reached:
-                        break
-
-                    await asyncio.sleep(1)
-                    await submission.load()
-                    await submission.comments.replace_more(limit=0)
-
-                    for comment in submission.comments.list():
-                        if comment.id not in processed_comment_ids and comment.body not in configs.FORBIDDEN_COMMENTS:
-                            all_potential_source_comments.append(comment)
-                            processed_comment_ids.add(comment.id)
-                            if len(all_potential_source_comments) > 1000:
-                                limit_reached = True
-                                break
-                if limit_reached:
+                if len(all_potential_source_comments) > 1000:
                     break
 
             log.info(f"Collected {len(all_potential_source_comments)} potential source comments.")
-            all_replies = []
 
-            for source_comment in all_potential_source_comments:
-                await asyncio.sleep(1)
+            all_replies = await self._collect_replies(all_potential_source_comments)
+            best_reply = await self._find_best_reply(all_replies)
 
-                try:
-                    for reply in source_comment.replies:
-                        if reply.body and reply.body.strip() and reply.body not in configs.FORBIDDEN_COMMENTS:
-                            all_replies.append(reply)
+            if best_reply:
+                log.info(f"Highest-rated reply found: '{best_reply.id}' with score {best_reply.score}")
 
-                except RequestException as e:
-                    log.error(f"Error processing source comment {source_comment.id} for replies: {e}")
-
-            all_replies.sort(key=lambda r: r.score, reverse=True)
-            best_reply_found = None
-
-            for reply in all_replies:
-                is_used = await models.Reply.filter(text=reply.body).exists()
-
-                if not is_used:
-                    best_reply_found = reply
-                    break
-
-            if best_reply_found:
-                log.info(f"Highest-rated reply found: '{best_reply_found.id}' with score {best_reply_found.score}")
-                log.info(f"URL: https://www.reddit.com{best_reply_found.permalink}")
-
-                if not best_reply_found.body.strip():
+                if not best_reply.body.strip():
                     log.warning(f"Reply text for mention '{mention.id}' is empty or whitespace, skipping.")
                     return False
 
-                comment_text = best_reply_found.body.strip()[:10000]
+                comment_text = best_reply.body.strip()[:10000]
 
                 try:
                     bot_comment = await mention.reply(comment_text)
@@ -367,12 +396,12 @@ class Bot:
                 subreddit_obj, created = await models.Subreddit.get_or_create(name=subreddit_name)
 
                 await models.Reply.create(
-                    text=best_reply_found.body,
+                    text=best_reply.body,
                     submission_id=original_comment.submission.id,
                     comment_id=bot_comment.id,
-                    reference_submission_id=best_reply_found.submission.id,
-                    reference_comment_id=best_reply_found.id,
-                    reference_author=str(best_reply_found.author),
+                    reference_submission_id=best_reply.submission.id,
+                    reference_comment_id=best_reply.id,
+                    reference_author=str(best_reply.author),
                     subreddit=subreddit_obj,
                 )
                 return True
@@ -415,12 +444,11 @@ async def run_comment_processor(bot: Bot) -> None:
                 log.error(f"An exception occurred during the main process: {e}")
 
         else:
-            log.info(f"Outside working hours ({configs.WORKING_HOURS}). Bot is inactive.")
+            pass
 
         min_sleep_seconds, max_sleep_seconds = configs.MIN_SLEEP_MINUTES * 60, configs.MAX_SLEEP_MINUTES * 60
         sleep_duration = random.randint(min_sleep_seconds, max_sleep_seconds)
         minutes, seconds = divmod(sleep_duration, 60)
-        log.info(f"Waiting for {minutes} minutes and {seconds} seconds...")
         await asyncio.sleep(sleep_duration)
 
 
