@@ -442,7 +442,6 @@ async def run_comment_processor(bot: Bot) -> None:
                 await bot.process_post()
             except Exception as e:
                 log.error(f"An exception occurred during the main process: {e}")
-
         else:
             pass
 
