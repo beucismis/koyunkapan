@@ -7,11 +7,10 @@ import warnings
 
 import asyncpraw
 from asyncpraw.models import Comment, Message, Submission
-from asyncprawcore import ServerError
-from asyncprawcore.exceptions import RequestException
 
 from . import configs, database, models, utils
 from .logger import Logger
+from .utils import handle_api_exceptions
 
 log = Logger()
 warnings.filterwarnings("ignore")
@@ -21,6 +20,7 @@ class Bot:
     def __init__(self, reddit_instance: asyncpraw.Reddit) -> None:
         self.reddit = reddit_instance
         self.posts, self.comments, self.keywords = [], [], []
+        self.subreddit_names = []
 
     async def setup(self) -> None:
         subreddit_name = random.choice(configs.SUBREDDIT_NAMES)
@@ -28,29 +28,26 @@ class Bot:
         self.subreddit_obj, created = await models.Subreddit.get_or_create(name=subreddit_name)
         self.flairs = await models.Flair.filter(subreddit=self.subreddit_obj).values_list("fid", flat=True)
         self.replies = await models.Reply.filter(subreddit=self.subreddit_obj).values_list("submission_id", flat=True)
+        self.subreddit_names = await models.Subreddit.all().values_list("name", flat=True)
 
         if not self.flairs:
             await self.init_flair_replies()
 
+    @handle_api_exceptions()
     async def init_flair_replies(self) -> None:
-        try:
-            new_flairs = []
-            existing_flair_fids = await models.Flair.filter(subreddit=self.subreddit_obj).values_list("fid", flat=True)
-            existing_flair_fids = set(existing_flair_fids)
+        new_flairs = []
+        existing_flair_fids = await models.Flair.filter(subreddit=self.subreddit_obj).values_list("fid", flat=True)
+        existing_flair_fids = set(existing_flair_fids)
 
-            async for flair in self.subreddit.flair.link_templates:
-                if flair["id"] not in existing_flair_fids:
-                    new_flairs.append(models.Flair(fid=flair["id"], subreddit=self.subreddit_obj, name=flair["text"]))
+        async for flair in self.subreddit.flair.link_templates:
+            if flair["id"] not in existing_flair_fids:
+                new_flairs.append(models.Flair(fid=flair["id"], subreddit=self.subreddit_obj, name=flair["text"]))
 
-            if new_flairs:
-                await models.Flair.bulk_create(new_flairs)
-                log.info(f"Added {len(new_flairs)} new flairs to the database.")
+        if new_flairs:
+            await models.Flair.bulk_create(new_flairs)
+            log.info(f"Added {len(new_flairs)} new flairs to the database.")
 
-        except asyncpraw.exceptions.APIException as e:
-            log.error(f"An API error occurred while fetching flairs: {e}")
-        except Exception as e:
-            log.error(f"An unexpected error occurred while fetching flairs: {e}")
-
+    @handle_api_exceptions()
     async def fetch_new_submissions(self) -> None:
         self.submissions = []
         seen_ids = set()
@@ -69,6 +66,7 @@ class Bot:
 
         log.info(f"{len(self.submissions)} potential submission collected.")
 
+    @handle_api_exceptions()
     async def select_random_submission(self) -> Submission | None:
         for _ in range(configs.RANDOM_POST_COUNT):
             if not self.submissions:
@@ -77,11 +75,12 @@ class Bot:
             submission = random.choice(self.submissions)
             await submission.load()
 
-            if len(submission.comments.list()) >= configs.RANDOM_POST_COUNT:
+            if submission.num_comments >= configs.RANDOM_POST_COUNT:
                 return submission
 
         return None
 
+    @handle_api_exceptions()
     async def extract_keywords_from_submission(self, submission: Submission) -> None:
         self.keywords = []
         submission.comment_sort = "best"
@@ -104,22 +103,18 @@ class Bot:
 
         self.keywords = list(dict.fromkeys(self.keywords))[: configs.MAX_KEYWORDS]
 
+    @handle_api_exceptions()
     async def find_similar_submissions(self, title: str, is_nsfw: bool) -> list[Submission] | None:
         results = []
+        query = f"{(' OR ').join(title.split())} nsfw:{'yes' if is_nsfw else 'no'}"
+        log.info(f"Query: '{query}'")
 
-        try:
-            query = f"{(' OR ').join(title.split())} nsfw:{'yes' if is_nsfw else 'no'}"
-            log.info(f"Query: '{query}'")
+        async for post in self.subreddit.search(query, limit=configs.SEARCH_LIMIT):
+            results.append(post)
 
-            async for post in self.subreddit.search(query, limit=configs.SEARCH_LIMIT):
-                results.append(post)
+        return results
 
-            return results
-
-        except ServerError as e:
-            log.error(f"Server error occurred while searching for similar submissions: {e}")
-            return None
-
+    @handle_api_exceptions()
     async def collect_comments_from_submissions(
         self, submissions: list[Submission], original_submission: Submission
     ) -> list[Comment]:
@@ -168,6 +163,7 @@ class Bot:
         log.warning("No suitable match found among similar comments.")
         return []
 
+    @handle_api_exceptions()
     async def submission_comment(self, submission: Submission, comments: list[Comment]) -> None:
         if not comments:
             log.warning(f"No suitable comments found for submission '{submission.id}'.")
@@ -178,7 +174,7 @@ class Bot:
         for comment in comments:
             try:
                 comment_text = comment.body.splitlines()[0].lower()
-                is_used = await models.Reply.filter(text=comment_text).exists()
+                is_used = await models.Reply.filter(reference_comment_id=comment.id).exists()
 
                 if not is_used:
                     best_comment = comment
@@ -197,32 +193,27 @@ class Bot:
             log.warning(f"Comment text for submission '{submission.id}' is empty or whitespace, skipping.")
             return
 
+        bot_comment = await submission.reply(comment_text)
+
         try:
-            bot_comment = await submission.reply(comment_text)
+            flair = await models.Flair.get(fid=submission.link_flair_template_id, subreddit=self.subreddit_obj)
+        except Exception:
+            flair = None
 
-            try:
-                flair = await models.Flair.get(fid=submission.link_flair_template_id, subreddit=self.subreddit_obj)
-            except Exception:
-                flair = None
+        await models.Reply.create(
+            text=comment_text,
+            submission_id=submission.id,
+            comment_id=bot_comment.id,
+            reference_submission_id=best_comment.submission.id,
+            reference_comment_id=best_comment.id,
+            reference_author=str(best_comment.author),
+            flair=flair,
+            subreddit=self.subreddit_obj,
+        )
 
-            await models.Reply.create(
-                text=comment_text,
-                submission_id=submission.id,
-                comment_id=bot_comment.id,
-                reference_submission_id=best_comment.submission.id,
-                reference_comment_id=best_comment.id,
-                reference_author=str(best_comment.author),
-                flair=flair,
-                subreddit=self.subreddit_obj,
-            )
+        log.info(f"Successfully commented on post with ID '{submission.id}'.")
 
-            log.info(f"Successfully commented on post with ID '{submission.id}'.")
-
-        except asyncpraw.exceptions.APIException as e:
-            log.error(f"An API error occurred while commenting: {e}")
-        except Exception as e:
-            log.error(f"An unexpected error occurred while commenting: {e}")
-
+    @handle_api_exceptions()
     async def process_post(self, submission_id: str | None = None) -> None:
         if submission_id:
             submission = await self.reddit.submission(id=submission_id)
@@ -264,21 +255,20 @@ class Bot:
 
         return None
 
-    async def _search_submissions(self, query: str, subreddit_names: list[str]) -> list[Submission]:
+    @handle_api_exceptions()
+    async def _search_submissions(self, query: str) -> list[Submission]:
         submissions = []
 
         async def search_in_subreddit(subreddit_name):
             subreddit = await self.reddit.subreddit(subreddit_name)
 
-            try:
-                async for submission in subreddit.search(query, limit=configs.POST_LIMIT):
-                    submissions.append(submission)
-            except Exception as e:
-                log.error(f"Error searching in subreddit {subreddit_name}: {e}")
+            async for submission in subreddit.search(query, limit=configs.POST_LIMIT):
+                submissions.append(submission)
 
-        await asyncio.gather(*(search_in_subreddit(name) for name in subreddit_names))
+        await asyncio.gather(*(search_in_subreddit(name) for name in self.subreddit_names))
         return submissions
 
+    @handle_api_exceptions()
     async def _collect_source_comments(
         self, submissions: list[Submission], processed_comment_ids: set
     ) -> list[Comment]:
@@ -291,38 +281,33 @@ class Bot:
             if limit_reached:
                 return
 
-            try:
-                await submission.load()
-                await submission.comments.replace_more(limit=0)
+            await submission.load()
+            await submission.comments.replace_more(limit=0)
 
-                for comment in submission.comments.list():
-                    if limit_reached:
-                        break
+            for comment in submission.comments.list():
+                if limit_reached:
+                    break
 
-                    if comment.id not in processed_comment_ids and comment.body not in configs.FORBIDDEN_COMMENTS:
-                        all_potential_source_comments.append(comment)
-                        processed_comment_ids.add(comment.id)
+                if comment.id not in processed_comment_ids and comment.body not in configs.FORBIDDEN_COMMENTS:
+                    all_potential_source_comments.append(comment)
+                    processed_comment_ids.add(comment.id)
 
-                        if len(all_potential_source_comments) > 1000:
-                            limit_reached = True
-            except Exception as e:
-                log.error(f"Error processing submission {submission.id}: {e}")
+                    if len(all_potential_source_comments) > 1000:
+                        limit_reached = True
 
         await asyncio.gather(*(process_submission(sub) for sub in submissions))
         return all_potential_source_comments
 
+    @handle_api_exceptions()
     async def _collect_replies(self, source_comments: list[Comment]) -> list[Comment]:
         all_replies = []
 
         async def process_comment(source_comment):
-            try:
-                await source_comment.load()
+            await source_comment.load()
 
-                for reply in source_comment.replies:
-                    if reply.body and reply.body.strip() and reply.body not in configs.FORBIDDEN_COMMENTS:
-                        all_replies.append(reply)
-            except RequestException as e:
-                log.error(f"Error processing source comment {source_comment.id} for replies: {e}")
+            for reply in source_comment.replies:
+                if reply.body and reply.body.strip() and reply.body not in configs.FORBIDDEN_COMMENTS:
+                    all_replies.append(reply)
 
         await asyncio.gather(*(process_comment(comment) for comment in source_comments))
         return all_replies
@@ -334,120 +319,120 @@ class Bot:
         replies.sort(key=lambda r: r.score, reverse=True)
 
         for reply in replies:
-            is_used = await models.Reply.filter(text=reply.body).exists()
+            is_used = await models.Reply.filter(reference_comment_id=reply.id).exists()
 
             if not is_used:
                 return reply
 
         return None
 
+    @handle_api_exceptions()
     async def reply_to_mention(self, mention: Message) -> bool:
         log.info(f"New reply request received: {mention.id}")
 
-        try:
-            if not mention.parent_id.startswith("t1_"):
-                log.warning(f"Parent of mention {mention.id} is not a comment, skipping.")
-                return False
+        if not mention.parent_id.startswith("t1_"):
+            log.warning(f"Parent of mention {mention.id} is not a comment, skipping.")
+            return False
 
-            original_comment = await self.reddit.comment(mention.parent_id)
-            await original_comment.load()
-            keywords = original_comment.body.split()
+        original_comment = await self.reddit.comment(mention.parent_id)
+        await original_comment.load()
+        keywords = original_comment.body.split()
 
-            if not keywords:
-                log.warning("Comment to reply to is empty.")
-                return False
+        if not keywords:
+            log.warning("Comment to reply to is empty.")
+            return False
 
-            search_queries = utils.get_keyword_combinations(keywords)
-            log.info(f"{len(search_queries)} different search queries created.")
-            subreddit_names = await models.Subreddit.all().values_list("name", flat=True)
-            all_potential_source_comments = []
-            processed_comment_ids = {original_comment.id}
+        search_queries = utils.get_keyword_combinations(keywords)
+        log.info(f"{len(search_queries)} different search queries created.")
+        all_potential_source_comments = []
+        processed_comment_ids = {original_comment.id}
 
-            for i, query in enumerate(search_queries):
-                submissions = await self._search_submissions(query, subreddit_names)
+        for i, query in enumerate(search_queries):
+            submissions = await self._search_submissions(query)
+            if submissions:
                 source_comments = await self._collect_source_comments(submissions, processed_comment_ids)
-                all_potential_source_comments.extend(source_comments)
+                if source_comments:
+                    all_potential_source_comments.extend(source_comments)
 
-                if len(all_potential_source_comments) > 1000:
-                    break
+            if len(all_potential_source_comments) > 1000:
+                break
 
-            log.info(f"Collected {len(all_potential_source_comments)} potential source comments.")
+        log.info(f"Collected {len(all_potential_source_comments)} potential source comments.")
 
-            all_replies = await self._collect_replies(all_potential_source_comments)
-            best_reply = await self._find_best_reply(all_replies)
+        if not all_potential_source_comments:
+            log.warning("No potential source comments found.")
+            return False
 
-            if best_reply:
-                log.info(f"Highest-rated reply found: '{best_reply.id}' with score {best_reply.score}")
+        all_replies = await self._collect_replies(all_potential_source_comments)
 
-                if not best_reply.body.strip():
-                    log.warning(f"Reply text for mention '{mention.id}' is empty or whitespace, skipping.")
-                    return False
+        if not all_replies:
+            log.warning("No replies found for the given source comments.")
+            return False
 
-                comment_text = best_reply.body.strip()[:10000]
+        best_reply = await self._find_best_reply(all_replies)
 
-                try:
-                    bot_comment = await mention.reply(comment_text)
-                except asyncpraw.exceptions.APIException as e:
-                    log.error(f"API error while replying to mention {mention.id}: {e}")
-                    return False
+        if best_reply:
+            log.info(f"Highest-rated reply found: '{best_reply.id}' with score {best_reply.score}")
 
-                log.info(f"Reply sent to comment with ID '{mention.id}'.")
-                subreddit_name = original_comment.subreddit.display_name
-                subreddit_obj, created = await models.Subreddit.get_or_create(name=subreddit_name)
-
-                await models.Reply.create(
-                    text=best_reply.body,
-                    submission_id=original_comment.submission.id,
-                    comment_id=bot_comment.id,
-                    reference_submission_id=best_reply.submission.id,
-                    reference_comment_id=best_reply.id,
-                    reference_author=str(best_reply.author),
-                    subreddit=subreddit_obj,
-                )
-                return True
-
-            else:
-                log.warning("No suitable reply found in any search results.")
+            if not best_reply.body.strip():
+                log.warning(f"Reply text for mention '{mention.id}' is empty or whitespace, skipping.")
                 return False
 
-        except Exception as e:
-            log.error(f"An unexpected error occurred in reply_to_mention for mention {mention.id}: {e}")
+            comment_text = best_reply.body.strip()[:10000]
+
+            bot_comment = await mention.reply(comment_text)
+
+            if not bot_comment:
+                log.error(f"Failed to send reply to mention {mention.id}")
+                return False
+
+            log.info(f"Reply sent to comment with ID '{mention.id}'.")
+            subreddit_name = original_comment.subreddit.display_name
+            subreddit_obj, created = await models.Subreddit.get_or_create(name=subreddit_name)
+
+            await models.Reply.create(
+                text=best_reply.body,
+                submission_id=original_comment.submission.id,
+                comment_id=bot_comment.id,
+                reference_submission_id=best_reply.submission.id,
+                reference_comment_id=best_reply.id,
+                reference_author=str(best_reply.author),
+                subreddit=subreddit_obj,
+            )
+            return True
+
+        else:
+            log.warning("No suitable reply found in any search results.")
             return False
 
 
+@handle_api_exceptions()
 async def check_inbox(bot: Bot) -> None:
     while True:
-        try:
-            async for item in bot.reddit.inbox.unread(limit=None):
-                if item.type == "comment_reply":
-                    success = await bot.reply_to_mention(item)
+        async for item in bot.reddit.inbox.unread(limit=None):
+            if item.type == "comment_reply":
+                success = await bot.reply_to_mention(item)
 
-                    if success:
-                        await item.mark_read()
-
-        except Exception as e:
-            log.error(f"An error occurred while checking inbox: {e}")
+                if success:
+                    await item.mark_read()
 
         await asyncio.sleep(configs.INBOX_CHECK_INTERVAL)
 
 
+@handle_api_exceptions()
 async def run_comment_processor(bot: Bot) -> None:
     while True:
         await bot.setup()
         current_hour = time.strftime("%H")
 
         if current_hour in configs.WORKING_HOURS:
-            try:
-                log.info("Processing a random post...")
-                await bot.process_post()
-            except Exception as e:
-                log.error(f"An exception occurred during the main process: {e}")
+            log.info("Processing a random post...")
+            await bot.process_post()
         else:
             pass
 
         min_sleep_seconds, max_sleep_seconds = configs.MIN_SLEEP_MINUTES * 60, configs.MAX_SLEEP_MINUTES * 60
         sleep_duration = random.randint(min_sleep_seconds, max_sleep_seconds)
-        minutes, seconds = divmod(sleep_duration, 60)
         await asyncio.sleep(sleep_duration)
 
 
