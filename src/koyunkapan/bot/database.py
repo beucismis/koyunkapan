@@ -21,7 +21,10 @@ async def init() -> None:
     if _db_initialized:
         return
 
-    await Tortoise.init(db_url=f"sqlite://{database_file}", modules={"models": ["koyunkapan.bot.models"]})
+    await Tortoise.init(
+        db_url=f"sqlite://{database_file}",
+        modules={"models": ["koyunkapan.bot.models"]},
+    )
     await Tortoise.generate_schemas()
     _db_initialized = True
 
