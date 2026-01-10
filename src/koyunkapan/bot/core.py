@@ -2,11 +2,14 @@ import asyncio
 import configparser
 import os
 import random
+import re
 import time
 import warnings
 
 import asyncpraw
+from asyncpraw.exceptions import APIException
 from asyncpraw.models import Comment, Message, Submission
+from asyncprawcore.exceptions import RequestException, ServerError
 
 from . import configs, database, models, utils
 from .logger import Logger
@@ -19,7 +22,7 @@ warnings.filterwarnings("ignore")
 class Bot:
     def __init__(self, reddit_instance: asyncpraw.Reddit) -> None:
         self.reddit = reddit_instance
-        self.posts, self.comments, self.keywords = [], [], []
+        self.keywords = []
         self.subreddit_names = []
 
     async def setup(self) -> None:
@@ -41,7 +44,13 @@ class Bot:
 
         async for flair in self.subreddit.flair.link_templates:
             if flair["id"] not in existing_flair_fids:
-                new_flairs.append(models.Flair(fid=flair["id"], subreddit=self.subreddit_obj, name=flair["text"]))
+                new_flairs.append(
+                    models.Flair(
+                        fid=flair["id"],
+                        subreddit=self.subreddit_obj,
+                        name=flair["text"],
+                    )
+                )
 
         if new_flairs:
             await models.Flair.bulk_create(new_flairs)
@@ -114,38 +123,75 @@ class Bot:
 
         return results
 
-    @handle_api_exceptions()
     async def collect_comments_from_submissions(
         self, submissions: list[Submission], original_submission: Submission
     ) -> list[Comment]:
         comments = []
 
         for submission in submissions:
-            submission.comment_sort = "best"
-            await submission.load()
-
             if submission.id == original_submission.id:
                 continue
 
-            for top_level_comment in submission.comments.list()[: configs.TOP_COMMENT_LIMIT]:
-                try:
-                    comment_text = top_level_comment.body.splitlines()[0].lower()
+            submission.comment_sort = "best"
 
-                    if comment_text not in configs.FORBIDDEN_COMMENTS and len(comment_text) > 0:
-                        comments.append(top_level_comment)
-                except IndexError:
-                    log.warning(f"Comment '{top_level_comment.id}' has an empty body, skipping.")
-                    continue
+            for attempt in range(3):
+                try:
+                    await submission.load()
+
+                    for top_level_comment in submission.comments.list()[: configs.TOP_COMMENT_LIMIT]:
+                        try:
+                            comment_text = top_level_comment.body.splitlines()[0].lower()
+
+                            if comment_text not in configs.FORBIDDEN_COMMENTS and len(comment_text) > 0:
+                                comments.append(top_level_comment)
+                        except IndexError:
+                            log.warning(f"Comment '{top_level_comment.id}' has an empty body, skipping.")
+                            continue
+                    break
+
+                except APIException as e:
+                    if e.error_type == "RATELIMIT":
+                        message = e.message
+                        log.warning(f"Rate limit exceeded on submission {submission.id}: {message}. Retrying...")
+
+                        try:
+                            sleep_time_str = re.search(r"(\d+)\s+(minutes|seconds)", message)
+
+                            if sleep_time_str:
+                                sleep_time = int(sleep_time_str.group(1))
+
+                                if sleep_time_str.group(2) == "minutes":
+                                    sleep_time *= 60
+
+                                log.info(f"Sleeping for {sleep_time} seconds due to rate limit.")
+                                await asyncio.sleep(sleep_time)
+                            else:
+                                await asyncio.sleep(5 * (2**attempt))
+                        except (AttributeError, IndexError):
+                            await asyncio.sleep(5 * (2**attempt))
+                    else:
+                        log.error(f"API Exception on submission {submission.id}: {e}")
+                        break
+
+                except (RequestException, ServerError) as e:
+                    log.warning(f"Request/Server Exception on submission {submission.id}: {e}. Retrying...")
+                    await asyncio.sleep(5 * (2**attempt))
+                except Exception as e:
+                    log.error(f"An unexpected error occurred on submission {submission.id}: {e}")
+                    break
 
         log.info(f"'{len(comments)}' similar comments collected.")
         return comments
 
-    def find_best_comments(self, submission: Submission, comments: list[Comment]) -> list[Comment]:
-        if comments:
-            comment_scores = [
-                (comment, utils.calculate_sentence_difference(comment.body.splitlines()[0].lower(), self.keywords))
-                for comment in comments
-            ]
+        def find_best_comments(self, comments: list[Comment]) -> list[Comment]:
+            if comments:
+                comment_scores = [
+                    (
+                        comment,
+                        utils.calculate_sentence_difference(comment.body.splitlines()[0].lower(), self.keywords),
+                    )
+                    for comment in comments
+                ]
 
             if not comment_scores:
                 log.warning("Could not calculate scores for any comments.")
@@ -234,9 +280,9 @@ class Bot:
 
         if similar_submissions:
             comments = await self.collect_comments_from_submissions(similar_submissions, submission)
-            best_comments = self.find_best_comments(submission, comments)
+            best_comments = self.find_best_comments(comments)
         else:
-            best_comments = self.find_best_comments(submission, [])
+            best_comments = self.find_best_comments([])
 
         await self.submission_comment(submission, best_comments)
         log.info("--- Process Completed ---")
@@ -268,48 +314,110 @@ class Bot:
         await asyncio.gather(*(search_in_subreddit(name) for name in self.subreddit_names))
         return submissions
 
-    @handle_api_exceptions()
     async def _collect_source_comments(
         self, submissions: list[Submission], processed_comment_ids: set
     ) -> list[Comment]:
         all_potential_source_comments = []
         limit_reached = False
 
-        async def process_submission(submission):
-            nonlocal limit_reached
-
+        for submission in submissions:
             if limit_reached:
-                return
+                break
 
-            await submission.load()
-            await submission.comments.replace_more(limit=0)
+            for attempt in range(3):
+                try:
+                    await submission.load()
+                    await submission.comments.replace_more(limit=0)
 
-            for comment in submission.comments.list():
-                if limit_reached:
+                    for comment in submission.comments.list():
+                        if limit_reached:
+                            break
+
+                        if comment.id not in processed_comment_ids and comment.body not in configs.FORBIDDEN_COMMENTS:
+                            all_potential_source_comments.append(comment)
+                            processed_comment_ids.add(comment.id)
+
+                            if len(all_potential_source_comments) > 1000:
+                                limit_reached = True
                     break
 
-                if comment.id not in processed_comment_ids and comment.body not in configs.FORBIDDEN_COMMENTS:
-                    all_potential_source_comments.append(comment)
-                    processed_comment_ids.add(comment.id)
+                except APIException as e:
+                    if e.error_type == "RATELIMIT":
+                        message = e.message
+                        log.warning(f"Rate limit exceeded on submission {submission.id}: {message}. Retrying...")
 
-                    if len(all_potential_source_comments) > 1000:
-                        limit_reached = True
+                        try:
+                            sleep_time_str = re.search(r"(\d+)\s+(minutes|seconds)", message)
 
-        await asyncio.gather(*(process_submission(sub) for sub in submissions))
+                            if sleep_time_str:
+                                sleep_time = int(sleep_time_str.group(1))
+
+                                if sleep_time_str.group(2) == "minutes":
+                                    sleep_time *= 60
+
+                                log.info(f"Sleeping for {sleep_time} seconds due to rate limit.")
+                                await asyncio.sleep(sleep_time)
+                            else:
+                                await asyncio.sleep(5 * (2**attempt))
+                        except (AttributeError, IndexError):
+                            await asyncio.sleep(5 * (2**attempt))
+                    else:
+                        log.error(f"API Exception on submission {submission.id}: {e}")
+                        break
+
+                except (RequestException, ServerError) as e:
+                    log.warning(f"Request/Server Exception on submission {submission.id}: {e}. Retrying...")
+                    await asyncio.sleep(5 * (2**attempt))
+                except Exception as e:
+                    log.error(f"An unexpected error occurred on submission {submission.id}: {e}")
+                    break
+
         return all_potential_source_comments
 
-    @handle_api_exceptions()
     async def _collect_replies(self, source_comments: list[Comment]) -> list[Comment]:
         all_replies = []
 
-        async def process_comment(source_comment):
-            await source_comment.load()
+        for source_comment in source_comments:
+            for attempt in range(3):
+                try:
+                    await source_comment.load()
 
-            for reply in source_comment.replies:
-                if reply.body and reply.body.strip() and reply.body not in configs.FORBIDDEN_COMMENTS:
-                    all_replies.append(reply)
+                    for reply in source_comment.replies:
+                        if reply.body and reply.body.strip() and reply.body not in configs.FORBIDDEN_COMMENTS:
+                            all_replies.append(reply)
+                    break
 
-        await asyncio.gather(*(process_comment(comment) for comment in source_comments))
+                except APIException as e:
+                    if e.error_type == "RATELIMIT":
+                        message = e.message
+                        log.warning(f"Rate limit exceeded on comment {source_comment.id}: {message}. Retrying...")
+
+                        try:
+                            sleep_time_str = re.search(r"(\d+)\s+(minutes|seconds)", message)
+
+                            if sleep_time_str:
+                                sleep_time = int(sleep_time_str.group(1))
+
+                                if sleep_time_str.group(2) == "minutes":
+                                    sleep_time *= 60
+
+                                log.info(f"Sleeping for {sleep_time} seconds due to rate limit.")
+                                await asyncio.sleep(sleep_time)
+                            else:
+                                await asyncio.sleep(5 * (2**attempt))
+                        except (AttributeError, IndexError):
+                            await asyncio.sleep(5 * (2**attempt))
+                    else:
+                        log.error(f"API Exception on comment {source_comment.id}: {e}")
+                        break
+
+                except (RequestException, ServerError) as e:
+                    log.warning(f"Request/Server Exception on comment {source_comment.id}: {e}. Retrying...")
+                    await asyncio.sleep(5 * (2**attempt))
+                except Exception as e:
+                    log.error(f"An unexpected error occurred on comment {source_comment.id}: {e}")
+                    break
+
         return all_replies
 
     async def _find_best_reply(self, replies: list[Comment]) -> Comment | None:
@@ -423,15 +531,15 @@ async def check_inbox(bot: Bot) -> None:
 async def run_comment_processor(bot: Bot) -> None:
     while True:
         await bot.setup()
-        current_hour = time.strftime("%H")
 
-        if current_hour in configs.WORKING_HOURS:
+        if time.strftime("%H") in configs.WORKING_HOURS:
             log.info("Processing a random post...")
             await bot.process_post()
-        else:
-            pass
 
-        min_sleep_seconds, max_sleep_seconds = configs.MIN_SLEEP_MINUTES * 60, configs.MAX_SLEEP_MINUTES * 60
+        min_sleep_seconds, max_sleep_seconds = (
+            configs.MIN_SLEEP_MINUTES * 60,
+            configs.MAX_SLEEP_MINUTES * 60,
+        )
         sleep_duration = random.randint(min_sleep_seconds, max_sleep_seconds)
         await asyncio.sleep(sleep_duration)
 
