@@ -183,15 +183,15 @@ class Bot:
         log.info(f"'{len(comments)}' similar comments collected.")
         return comments
 
-        def find_best_comments(self, comments: list[Comment]) -> list[Comment]:
-            if comments:
-                comment_scores = [
-                    (
-                        comment,
-                        utils.calculate_sentence_difference(comment.body.splitlines()[0].lower(), self.keywords),
-                    )
-                    for comment in comments
-                ]
+    def find_best_comments(self, comments: list[Comment]) -> list[Comment]:
+        if comments:
+            comment_scores = [
+                (
+                    comment,
+                    utils.calculate_sentence_difference(comment.body.splitlines()[0].lower(), self.keywords),
+                )
+                for comment in comments
+            ]
 
             if not comment_scores:
                 log.warning("Could not calculate scores for any comments.")
