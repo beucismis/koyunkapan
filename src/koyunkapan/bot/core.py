@@ -186,12 +186,12 @@ class Bot:
         log.info(f"'{len(comments)}' similar comments collected.")
         return comments
 
-    def find_best_comments(self, comments: list[Comment]) -> list[Comment]:
+    def find_best_comments(self, comments: list[Comment], keywords: list[str]) -> list[Comment]:
         if comments:
             comment_scores = [
                 (
                     comment,
-                    utils.calculate_sentence_difference(comment.body.splitlines()[0].lower(), self.keywords),
+                    utils.calculate_sentence_difference(comment.body.splitlines()[0].lower(), keywords),
                 )
                 for comment in comments
             ]
@@ -283,9 +283,9 @@ class Bot:
 
         if similar_submissions:
             comments = await self.collect_comments_from_submissions(similar_submissions, submission)
-            best_comments = self.find_best_comments(comments)
+            best_comments = self.find_best_comments(comments, self.keywords)
         else:
-            best_comments = self.find_best_comments([])
+            best_comments = self.find_best_comments([], self.keywords)
 
         await self.submission_comment(submission, best_comments)
         log.info("--- Process Completed ---")
@@ -428,6 +428,16 @@ class Bot:
 
         return all_replies
 
+    async def _find_first_unused_comment(self, comments: list[Comment]) -> Comment | None:
+        if not comments:
+            return None
+
+        for comment in comments:
+            is_used = await models.Reply.filter(reference_comment_id=comment.id).exists()
+            if not is_used:
+                return comment
+        return None
+
     async def _find_best_reply(self, replies: list[Comment]) -> Comment | None:
         if not replies:
             return None
@@ -504,19 +514,14 @@ class Bot:
             log.warning("No potential source comments found.")
             return False
 
-        all_replies = await self._collect_replies(all_potential_source_comments)
+        best_comments = self.find_best_comments(all_potential_source_comments, keywords)
+        best_comment = await self._find_first_unused_comment(best_comments)
 
-        if not all_replies:
-            log.warning("No replies found for the given source comments.")
-            return False
+        if not best_comment and best_comments:
+            log.warning("All suitable comments have been used. Picking a random one.")
+            best_comment = random.choice(best_comments)
 
-        best_reply = await self._find_best_reply(all_replies)
-
-        if not best_reply and all_replies:
-            log.warning("All suitable replies have been used. Picking a random one.")
-            best_reply = random.choice(all_replies)
-
-        if not best_reply:
+        if not best_comment:
             log.warning(
                 "No suitable reply found in any search results. Falling back to random comment from original submission."
             )
@@ -535,8 +540,8 @@ class Bot:
                 ]
 
                 if valid_comments:
-                    best_reply = random.choice(valid_comments)
-                    log.info(f"Fallback successful. Picked random comment {best_reply.id}")
+                    best_comment = random.choice(valid_comments)
+                    log.info(f"Fallback successful. Picked random comment {best_comment.id}")
                 else:
                     log.warning("Fallback failed: No valid random comments found in original submission.")
                     return False
@@ -545,14 +550,14 @@ class Bot:
                 log.error(f"Error during fallback to random comment: {e}")
                 return False
 
-        if best_reply:
-            log.info(f"Highest-rated reply found: '{best_reply.id}' with score {best_reply.score}")
+        if best_comment:
+            log.info(f"Highest-rated comment found: '{best_comment.id}'")
 
-            if not best_reply.body.strip():
+            if not best_comment.body.strip():
                 log.warning(f"Reply text for mention '{mention.id}' is empty or whitespace, skipping.")
                 return False
 
-            comment_text = best_reply.body.strip()[:10000]
+            comment_text = best_comment.body.strip()[:10000]
             bot_comment = await mention.reply(comment_text)
 
             if not bot_comment:
@@ -564,12 +569,12 @@ class Bot:
             subreddit_obj, created = await models.Subreddit.get_or_create(name=subreddit_name)
 
             await models.Reply.create(
-                text=best_reply.body,
+                text=best_comment.body,
                 submission_id=original_comment.submission.id,
                 comment_id=bot_comment.id,
-                reference_submission_id=best_reply.submission.id,
-                reference_comment_id=best_reply.id,
-                reference_author=str(best_reply.author),
+                reference_submission_id=best_comment.submission.id,
+                reference_comment_id=best_comment.id,
+                reference_author=str(best_comment.author),
                 subreddit=subreddit_obj,
             )
             return True
