@@ -516,6 +516,35 @@ class Bot:
             log.warning("All suitable replies have been used. Picking a random one.")
             best_reply = random.choice(all_replies)
 
+        if not best_reply:
+            log.warning(
+                "No suitable reply found in any search results. Falling back to random comment from original submission."
+            )
+            try:
+                original_submission = await self.reddit.submission(id=original_comment.submission.id)
+                await original_submission.load()
+                comments = original_submission.comments.list()
+
+                valid_comments = [
+                    c
+                    for c in comments
+                    if c.author
+                    and c.author.name != self.reddit.user.me()
+                    and c.body not in configs.FORBIDDEN_COMMENTS
+                    and c.id != original_comment.id
+                ]
+
+                if valid_comments:
+                    best_reply = random.choice(valid_comments)
+                    log.info(f"Fallback successful. Picked random comment {best_reply.id}")
+                else:
+                    log.warning("Fallback failed: No valid random comments found in original submission.")
+                    return False
+
+            except Exception as e:
+                log.error(f"Error during fallback to random comment: {e}")
+                return False
+
         if best_reply:
             log.info(f"Highest-rated reply found: '{best_reply.id}' with score {best_reply.score}")
 
