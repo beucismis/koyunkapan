@@ -16,20 +16,20 @@ RANDOM_POST_COUNT = 10
 TOP_COMMENT_LIMIT = 10
 SIMILARITY_THRESHOLD = 1.35
 
-SUBREDDIT_NAMES = [
-    "KGBTR",
-    "bokteri",
-    "Eleteria",
-    "CuteTopia",
-    "WeebTurks",
-    "Cikopolis",
-    "TurkishCats",
-    "Turkishdogs",
-    "SacmaBirSub",
-    "kopyamakarna",
-    "BAYIRDOMUZLARI",
-    "CursedYemekler",
-]
+SUBREDDIT_WEIGHTS = {
+    "KGBTR": 1.4,
+    "bokteri": 1.0,
+    "Eleteria": 1.0,
+    "CuteTopia": 1.0,
+    "WeebTurks": 1.0,
+    "Cikopolis": 1.1,
+    "TurkishCats": 1.0,
+    "Turkishdogs": 1.0,
+    "SacmaBirSub": 1.1,
+    "kopyamakarna": 1.0,
+    "BAYIRDOMUZLARI": 1.2,
+    "CursedYemekler": 1.0,
+}
 
 FORBIDDEN_FLAIR = "Ciddi"
 FORBIDDEN_COMMENTS = ("[removed]", "[deleted]", "", " ", None)
