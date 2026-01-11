@@ -26,7 +26,9 @@ class Bot:
         self.subreddit_names = []
 
     async def setup(self) -> None:
-        subreddit_name = random.choice(configs.SUBREDDIT_NAMES)
+        subreddits = list(configs.SUBREDDIT_WEIGHTS.keys())
+        weights = list(configs.SUBREDDIT_WEIGHTS.values())
+        subreddit_name = random.choices(subreddits, weights=weights, k=1)[0]
         self.subreddit = await self.reddit.subreddit(subreddit_name)
         self.subreddit_obj, created = await models.Subreddit.get_or_create(name=subreddit_name)
         self.flairs = await models.Flair.filter(subreddit=self.subreddit_obj).values_list("fid", flat=True)
@@ -434,17 +436,20 @@ class Bot:
 
         return None
 
-    @handle_api_exceptions()
     async def reply_to_mention(self, mention: Message) -> bool:
         log.info(f"New reply request received: {mention.id}")
 
-        if not mention.parent_id.startswith("t1_"):
-            log.warning(f"Parent of mention {mention.id} is not a comment, skipping.")
-            return False
+        try:
+            if not mention.parent_id.startswith("t1_"):
+                log.warning(f"Parent of mention {mention.id} is not a comment, skipping.")
+                return False
 
-        original_comment = await self.reddit.comment(mention.parent_id)
-        await original_comment.load()
-        keywords = original_comment.body.split()
+            original_comment = await self.reddit.comment(mention.parent_id)
+            await original_comment.load()
+            keywords = original_comment.body.split()
+        except (APIException, RequestException, ServerError) as e:
+            log.error(f"Failed to fetch original comment for mention {mention.id}: {e}")
+            return False
 
         if not keywords:
             log.warning("Comment to reply to is empty.")
@@ -514,15 +519,23 @@ class Bot:
             return False
 
 
-@handle_api_exceptions()
 async def check_inbox(bot: Bot) -> None:
     while True:
-        async for item in bot.reddit.inbox.unread(limit=None):
-            if item.type == "comment_reply":
-                success = await bot.reply_to_mention(item)
-
-                if success:
-                    await item.mark_read()
+        try:
+            async for item in bot.reddit.inbox.unread(limit=None):
+                if item.type == "comment_reply":
+                    try:
+                        success = await bot.reply_to_mention(item)
+                        if success:
+                            await item.mark_read()
+                        else:
+                            log.warning(f"Failed to process mention {item.id}, marking as read to avoid loop.")
+                            await item.mark_read()
+                    except Exception as e:
+                        log.error(f"An unexpected error occurred while processing mention {item.id}: {e}")
+                        await item.mark_read()
+        except (APIException, RequestException, ServerError) as e:
+            log.error(f"An error occurred while checking inbox: {e}")
 
         await asyncio.sleep(configs.INBOX_CHECK_INTERVAL)
 
