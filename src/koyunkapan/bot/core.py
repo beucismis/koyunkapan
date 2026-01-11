@@ -474,12 +474,21 @@ class Bot:
             for query in search_queries:
                 async for submission in subreddit_to_search.search(query, limit=configs.POST_LIMIT):
                     submissions.append(submission)
-
                 if len(submissions) > 200:
                     break
         except (APIException, RequestException, ServerError) as e:
-            log.error(f"Error searching for submissions in {subreddit_to_search.display_name}: {e}")
-            return False
+            log.warning(
+                f"Error searching for submissions in {subreddit_to_search.display_name}, trying all subreddits: {e}"
+            )
+
+        if not submissions:
+            log.info("No submissions found in original subreddit, searching all subreddits.")
+            for query in search_queries:
+                subs = await self._search_submissions(query)
+                if subs:
+                    submissions.extend(subs)
+                if len(submissions) > 200:
+                    break
 
         all_potential_source_comments = []
         processed_comment_ids = {original_comment.id}
