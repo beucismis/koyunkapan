@@ -9,12 +9,13 @@ import warnings
 import asyncpraw
 from asyncpraw.exceptions import APIException
 from asyncpraw.models import Comment, Message, Submission
-from asyncprawcore.exceptions import RequestException, ServerError
+from asyncprawcore.exceptions import RequestException, ServerError, TooManyRequests
 
 from . import configs, database, models, utils
-from .logger import log
+from .logger import Logger
 from .utils import handle_api_exceptions
 
+log = Logger()
 warnings.filterwarnings("ignore")
 
 
@@ -150,9 +151,9 @@ class Bot:
                             continue
                     break
 
-                except APIException as e:
-                    if e.error_type == "RATELIMIT":
-                        message = e.message
+                except (APIException, TooManyRequests) as e:
+                    if (isinstance(e, APIException) and e.error_type == "RATELIMIT") or isinstance(e, TooManyRequests):
+                        message = e.message if isinstance(e, APIException) else str(e)
                         log.warning(f"Rate limit exceeded on submission {submission.id}: {message}. Retrying...")
 
                         try:
@@ -343,9 +344,9 @@ class Bot:
                                 limit_reached = True
                     break
 
-                except APIException as e:
-                    if e.error_type == "RATELIMIT":
-                        message = e.message
+                except (APIException, TooManyRequests) as e:
+                    if (isinstance(e, APIException) and e.error_type == "RATELIMIT") or isinstance(e, TooManyRequests):
+                        message = e.message if isinstance(e, APIException) else str(e)
                         log.warning(f"Rate limit exceeded on submission {submission.id}: {message}. Retrying...")
 
                         try:
@@ -366,7 +367,6 @@ class Bot:
                     else:
                         log.error(f"API Exception on submission {submission.id}: {e}")
                         break
-
                 except (RequestException, ServerError) as e:
                     log.warning(f"Request/Server Exception on submission {submission.id}: {e}. Retrying...")
                     await asyncio.sleep(5 * (2**attempt))
@@ -391,9 +391,9 @@ class Bot:
                             all_replies.append(reply)
                     break
 
-                except APIException as e:
-                    if e.error_type == "RATELIMIT":
-                        message = e.message
+                except (APIException, TooManyRequests) as e:
+                    if (isinstance(e, APIException) and e.error_type == "RATELIMIT") or isinstance(e, TooManyRequests):
+                        message = e.message if isinstance(e, APIException) else str(e)
                         log.warning(f"Rate limit exceeded on comment {source_comment.id}: {message}. Retrying...")
 
                         try:
@@ -414,7 +414,6 @@ class Bot:
                     else:
                         log.error(f"API Exception on comment {source_comment.id}: {e}")
                         break
-
                 except (RequestException, ServerError) as e:
                     log.warning(f"Request/Server Exception on comment {source_comment.id}: {e}. Retrying...")
                     await asyncio.sleep(5 * (2**attempt))
