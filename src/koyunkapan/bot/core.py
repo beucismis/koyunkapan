@@ -512,6 +512,10 @@ class Bot:
 
         best_reply = await self._find_best_reply(all_replies)
 
+        if not best_reply and all_replies:
+            log.warning("All suitable replies have been used. Picking a random one.")
+            best_reply = random.choice(all_replies)
+
         if best_reply:
             log.info(f"Highest-rated reply found: '{best_reply.id}' with score {best_reply.score}")
 
