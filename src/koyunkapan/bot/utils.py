@@ -7,9 +7,7 @@ import numpy as np
 from asyncpraw.exceptions import APIException
 from asyncprawcore.exceptions import RequestException, ServerError
 
-from .logger import Logger
-
-log = Logger()
+from .logger import log
 
 
 def get_keyword_combinations(keywords: list[str]) -> list[str]:
