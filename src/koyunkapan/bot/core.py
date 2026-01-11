@@ -441,6 +441,10 @@ class Bot:
 
         return None
 
+    @handle_api_exceptions()
+    async def mark_as_read(self, item: Message) -> None:
+        await item.mark_read()
+
     async def reply_to_mention(self, mention: Message) -> bool:
         log.info(f"New reply request received: {mention.id}")
 
@@ -540,13 +544,13 @@ async def check_inbox(bot: Bot) -> None:
                     try:
                         success = await bot.reply_to_mention(item)
                         if success:
-                            await item.mark_read()
+                            await bot.mark_as_read(item)
                         else:
                             log.warning(f"Failed to process mention {item.id}, marking as read to avoid loop.")
-                            await item.mark_read()
+                            await bot.mark_as_read(item)
                     except Exception as e:
                         log.error(f"An unexpected error occurred while processing mention {item.id}: {e}")
-                        await item.mark_read()
+                        await bot.mark_as_read(item)
         except (APIException, RequestException, ServerError) as e:
             log.error(f"An error occurred while checking inbox: {e}")
 
