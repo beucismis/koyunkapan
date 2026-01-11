@@ -4,7 +4,7 @@ from datetime import datetime
 from . import configs
 
 
-class _Logger:
+class Logger:
     LEVELS = {
         "DEBUG": logging.DEBUG,
         "INFO": logging.INFO,
@@ -24,7 +24,7 @@ class _Logger:
         if self.logger.hasHandlers():
             self.logger.handlers.clear()
 
-        formatter = logging.Formatter(_Logger.TEMPLATE, datefmt="%Y-%m-%d %H:%M:%S")
+        formatter = logging.Formatter(Logger.TEMPLATE, datefmt="%Y-%m-%d %H:%M:%S")
 
         file_handler = logging.FileHandler(self.log_file, encoding="utf-8")
         file_handler.setLevel(self.level)
@@ -53,6 +53,3 @@ class _Logger:
 
     def critical(self, message: str, *args) -> None:
         self.logger.critical(message, *args)
-
-
-log = _Logger()
