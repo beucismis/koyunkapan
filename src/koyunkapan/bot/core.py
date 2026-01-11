@@ -12,10 +12,9 @@ from asyncpraw.models import Comment, Message, Submission
 from asyncprawcore.exceptions import RequestException, ServerError
 
 from . import configs, database, models, utils
-from .logger import Logger
+from .logger import log
 from .utils import handle_api_exceptions
 
-log = Logger()
 warnings.filterwarnings("ignore")
 
 
