@@ -174,12 +174,13 @@ class Bot:
                     else:
                         log.error(f"API Exception on submission {submission.id}: {e}")
                         break
-
                 except (RequestException, ServerError) as e:
                     log.warning(f"Request/Server Exception on submission {submission.id}: {e}. Retrying...")
                     await asyncio.sleep(5 * (2**attempt))
                 except Exception as e:
-                    log.error(f"An unexpected error occurred on submission {submission.id}: {e}")
+                    log.error(
+                        f"An unexpected error of type {type(e).__name__} occurred on submission {submission.id}: {e}"
+                    )
                     break
 
         log.info(f"'{len(comments)}' similar comments collected.")
@@ -371,7 +372,9 @@ class Bot:
                     log.warning(f"Request/Server Exception on submission {submission.id}: {e}. Retrying...")
                     await asyncio.sleep(5 * (2**attempt))
                 except Exception as e:
-                    log.error(f"An unexpected error occurred on submission {submission.id}: {e}")
+                    log.error(
+                        f"An unexpected error of type {type(e).__name__} occurred on submission {submission.id}: {e}"
+                    )
                     break
 
         return all_potential_source_comments
@@ -417,7 +420,9 @@ class Bot:
                     log.warning(f"Request/Server Exception on comment {source_comment.id}: {e}. Retrying...")
                     await asyncio.sleep(5 * (2**attempt))
                 except Exception as e:
-                    log.error(f"An unexpected error occurred on comment {source_comment.id}: {e}")
+                    log.error(
+                        f"An unexpected error of type {type(e).__name__} occurred on comment {source_comment.id}: {e}"
+                    )
                     break
 
         return all_replies
@@ -457,18 +462,27 @@ class Bot:
 
         search_queries = utils.get_keyword_combinations(keywords)
         log.info(f"{len(search_queries)} different search queries created.")
+        submissions = []
+        subreddit_to_search = original_comment.subreddit
+
+        try:
+            for query in search_queries:
+                async for submission in subreddit_to_search.search(query, limit=configs.POST_LIMIT):
+                    submissions.append(submission)
+
+                if len(submissions) > 200:
+                    break
+        except (APIException, RequestException, ServerError) as e:
+            log.error(f"Error searching for submissions in {subreddit_to_search.display_name}: {e}")
+            return False
+
         all_potential_source_comments = []
         processed_comment_ids = {original_comment.id}
 
-        for i, query in enumerate(search_queries):
-            submissions = await self._search_submissions(query)
-            if submissions:
-                source_comments = await self._collect_source_comments(submissions, processed_comment_ids)
-                if source_comments:
-                    all_potential_source_comments.extend(source_comments)
-
-            if len(all_potential_source_comments) > 1000:
-                break
+        if submissions:
+            source_comments = await self._collect_source_comments(submissions, processed_comment_ids)
+            if source_comments:
+                all_potential_source_comments.extend(source_comments)
 
         log.info(f"Collected {len(all_potential_source_comments)} potential source comments.")
 
@@ -492,7 +506,6 @@ class Bot:
                 return False
 
             comment_text = best_reply.body.strip()[:10000]
-
             bot_comment = await mention.reply(comment_text)
 
             if not bot_comment:
