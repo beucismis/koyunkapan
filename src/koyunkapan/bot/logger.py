@@ -4,7 +4,14 @@ from datetime import datetime
 from . import configs
 
 
-class Logger:
+class ContextFilter(logging.Filter):
+    def filter(self, record):
+        if not hasattr(record, "process"):
+            record.process = "main"
+        return True
+
+
+class _Logger:
     LEVELS = {
         "DEBUG": logging.DEBUG,
         "INFO": logging.INFO,
@@ -12,7 +19,7 @@ class Logger:
         "ERROR": logging.ERROR,
         "CRITICAL": logging.CRITICAL,
     }
-    TEMPLATE = "[%(asctime)s] [%(levelname)s] %(message)s"
+    TEMPLATE = "[%(asctime)s] [%(levelname)s] [%(process)s] %(message)s"
 
     def __init__(self, level: str = "INFO") -> None:
         self.log_file = configs.LOG_FILE
@@ -24,7 +31,7 @@ class Logger:
         if self.logger.hasHandlers():
             self.logger.handlers.clear()
 
-        formatter = logging.Formatter(Logger.TEMPLATE, datefmt="%Y-%m-%d %H:%M:%S")
+        formatter = logging.Formatter(_Logger.TEMPLATE, datefmt="%Y-%m-%d %H:%M:%S")
 
         file_handler = logging.FileHandler(self.log_file, encoding="utf-8")
         file_handler.setLevel(self.level)
@@ -36,6 +43,7 @@ class Logger:
 
         self.logger.addHandler(file_handler)
         self.logger.addHandler(console_handler)
+        self.logger.addFilter(ContextFilter())
 
         self.logger.info("--- Log started at %s ---", datetime.now())
 
@@ -53,3 +61,6 @@ class Logger:
 
     def critical(self, message: str, *args) -> None:
         self.logger.critical(message, *args)
+
+
+log = _Logger()

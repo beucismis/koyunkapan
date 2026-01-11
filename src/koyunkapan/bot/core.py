@@ -340,7 +340,7 @@ class Bot:
                             all_potential_source_comments.append(comment)
                             processed_comment_ids.add(comment.id)
 
-                            if len(all_potential_source_comments) > 1000:
+                            if len(all_potential_source_comments) > 200:
                                 limit_reached = True
                     break
 
@@ -381,7 +381,10 @@ class Bot:
     async def _collect_replies(self, source_comments: list[Comment]) -> list[Comment]:
         all_replies = []
 
-        for source_comment in source_comments:
+        for i, source_comment in enumerate(source_comments):
+            if i > 0 and i % 20 == 0:
+                await asyncio.sleep(10)
+
             for attempt in range(3):
                 try:
                     await source_comment.load()

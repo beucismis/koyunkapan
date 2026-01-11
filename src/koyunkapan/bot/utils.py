@@ -7,10 +7,6 @@ import numpy as np
 from asyncpraw.exceptions import APIException
 from asyncprawcore.exceptions import RequestException, ServerError
 
-from .logger import Logger
-
-log = Logger()
-
 
 def get_keyword_combinations(keywords: list[str]) -> list[str]:
     if not keywords:
@@ -77,6 +73,12 @@ def handle_api_exceptions(retries=3, backoff_factor=1):
     def decorator(func):
         @wraps(func)
         async def wrapper(*args, **kwargs):
+            log = kwargs.get("log")
+            if not log:
+                from .logger import log as default_log
+
+                log = default_log
+
             last_exception = None
 
             for attempt in range(retries):
