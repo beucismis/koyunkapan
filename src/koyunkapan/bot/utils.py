@@ -7,7 +7,9 @@ import numpy as np
 from asyncpraw.exceptions import APIException
 from asyncprawcore.exceptions import RequestException, ServerError
 
-from .logger import log
+from .logger import Logger
+
+log = Logger()
 
 
 def get_keyword_combinations(keywords: list[str]) -> list[str]:
@@ -123,6 +125,7 @@ def handle_api_exceptions(retries=3, backoff_factor=1):
 
             if last_exception:
                 log.error(f"Last exception: {last_exception}")
+
             return None
 
         return wrapper
