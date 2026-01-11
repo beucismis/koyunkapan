@@ -5,7 +5,11 @@ from functools import wraps
 
 import numpy as np
 from asyncpraw.exceptions import APIException
-from asyncprawcore.exceptions import RequestException, ServerError
+from asyncprawcore.exceptions import RequestException, ServerError, TooManyRequests
+
+from .logger import Logger
+
+log = Logger()
 
 
 def get_keyword_combinations(keywords: list[str]) -> list[str]:
@@ -73,24 +77,15 @@ def handle_api_exceptions(retries=3, backoff_factor=1):
     def decorator(func):
         @wraps(func)
         async def wrapper(*args, **kwargs):
-            log = kwargs.get("log")
-            if not log:
-                from .logger import log as default_log
-
-                log = default_log
-
             last_exception = None
 
             for attempt in range(retries):
                 try:
                     return await func(*args, **kwargs)
-                except APIException as e:
-                    last_exception = e
-
-                    if e.error_type == "RATELIMIT":
-                        message = e.message
-                        log.warning(f"Rate limit exceeded: {message}. Retrying in {backoff_factor} seconds...")
-                        await asyncio.sleep(backoff_factor)
+                except (APIException, TooManyRequests) as e:
+                    if (isinstance(e, APIException) and e.error_type == "RATELIMIT") or isinstance(e, TooManyRequests):
+                        message = e.message if isinstance(e, APIException) else str(e)
+                        log.warning(f"Rate limit exceeded: {message}. Retrying...")
 
                         try:
                             sleep_time_str = re.search(r"(\d+)\s+(minutes|seconds)", message)
@@ -104,14 +99,12 @@ def handle_api_exceptions(retries=3, backoff_factor=1):
                                 log.info(f"Sleeping for {sleep_time} seconds due to rate limit.")
                                 await asyncio.sleep(sleep_time)
                             else:
-                                await asyncio.sleep(backoff_factor * (2**attempt))
-
+                                await asyncio.sleep(5 * (2**attempt))
                         except (AttributeError, IndexError):
-                            await asyncio.sleep(backoff_factor * (2**attempt))
+                            await asyncio.sleep(5 * (2**attempt))
                     else:
                         log.error(f"API Exception in {func.__name__}: {e}")
                         return None
-
                 except (RequestException, ServerError) as e:
                     last_exception = e
                     log.warning(
@@ -120,7 +113,7 @@ def handle_api_exceptions(retries=3, backoff_factor=1):
                     await asyncio.sleep(backoff_factor * (2**attempt))
 
                 except Exception as e:
-                    log.error(f"An unexpected error occurred in {func.__name__}: {e}")
+                    log.error(f"An unexpected error of type {type(e).__name__} occurred in {func.__name__}: {e}")
                     return None
 
             log.error(f"Function {func.__name__} failed after {retries} retries.")
