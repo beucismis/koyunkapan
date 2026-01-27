@@ -17,7 +17,7 @@ TOP_COMMENT_LIMIT = 10
 SIMILARITY_THRESHOLD = 1.35
 
 SUBREDDIT_WEIGHTS = {
-    "KGBTR": 1.4,
+    "KGBTR": 2.0,
     "bokteri": 1.0,
     "Eleteria": 1.0,
     "CuteTopia": 1.0,
