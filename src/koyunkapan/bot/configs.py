@@ -20,7 +20,7 @@ TIER_2_SUBREDDIT_COUNT = 5
 
 SUBREDDIT_WEIGHTS = {
     "amip": 1.0,
-    "KGBTR": 1.5,
+    "KGBTR": 2.0,
     "delik": 1.0,
     "dewrim": 1.0,
     "bokteri": 1.0,
@@ -34,9 +34,9 @@ SUBREDDIT_WEIGHTS = {
     "TurkishCats": 1.0,
     "Turkishdogs": 1.0,
     "SacmaBirSub": 1.0,
+    "TurkeyJerky": 1.0,
     "kopyamakarna": 1.0,
     "aptalSoruYok": 1.0,
-    "TurkeyJerky": 1.0,
     "YIKIKHAYATLAR": 1.0,
     "yalnizucubeler": 1.0,
     "BAYIRDOMUZLARI": 1.0,
