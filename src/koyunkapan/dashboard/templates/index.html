@@ -1,20 +1,62 @@
 {% extends "base.html" %}
 {% block title %}KoyunKapan Dashboard{% endblock %}
 {% block main %}
-    <div class="data-container">
-        <div class="data-title">Last 15 Reply (Total: {{ total_replies }})</div>
+    <div class="grid-container">
+        <div class="panel">
+            <div class="data-title">Subreddit Activity</div>
+            <canvas id="subredditActivityChart"></canvas>
+        </div>
+        <div class="panel">
+            <div class="data-title">Top 10 Popular References</div>
+            <div class="logs">
+                {% for ref in popular_references %}
+                    {% set ref_url = "https://www.reddit.com/comments/" + ref.reference_submission_id %}
+                    <div>
+                        <a href="{{ ref_url }}" target="_blank">{{ ref.reference_submission_id }}</a> ({{ ref.count }} times)
+                    </div>
+                {% else %}
+                    <div>No references found.</div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    <div class="data-container" style="margin-top: 1rem;">
+        <div class="data-title">Last 15 Replies (Total: {{ total_replies }})</div>
         <div class="logs">
             {% for reply in replies[-15:] %}
                 {% set submission_url = "https://www.reddit.com/r/" + reply.subreddit__name + "/comments/" + reply.submission_id %}
-                {% set comment_url = "https://www.reddit.com/r/" + reply.subreddit__name + "/comments/" + reply.submission_id + "/comment/" + reply.comment_id %}
+                {% set comment_url = submission_url + "/comment/" + reply.comment_id %}
                 <div>
-                    r/{{ reply.subreddit__name }} - Submission: <a href="{{ submission_url }}">{{ reply.submission_id }}</a> - Comment: <a href="{{ comment_url }}">{{ reply.comment_id }}</a> - Text: {{ reply.text|e }}
+                    r/{{ reply.subreddit__name }} - <a href="{{ comment_url }}" target="_blank">Reply</a> to <a href="{{ submission_url }}" target="_blank">Submission</a>
                 </div>
             {% endfor %}
         </div>
-        <div class="data-title">Last 100 Log</div>
+        <div class="data-title">Last 100 Logs</div>
         <div class="logs">
             {% for line in logs %}<div>{{ line.strip() |e }}</div>{% endfor %}
         </div>
     </div>
+{% endblock %}
+{% block scripts %}
+<script>
+    const ctx = document.getElementById('subredditActivityChart');
+    new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: {{ chart_labels|tojson }},
+            datasets: [{
+                label: '# of Replies',
+                data: {{ chart_data|tojson }},
+                borderWidth: 1,
+                backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                borderColor: 'rgba(75, 192, 192, 1)',
+            }]
+        },
+        options: {
+            scales: {y: {beginAtZero: true}},
+            responsive: true,
+            maintainAspectRatio: false
+        }
+    });
+</script>
 {% endblock %}
