@@ -25,7 +25,6 @@ SUBREDDIT_WEIGHTS = {
     "dewrim": 1.0,
     "bokteri": 1.0,
     "Eleteria": 1.0,
-    "pedlesme": 1.0,
     "CuteTopia": 1.0,
     "WeebTurks": 1.0,
     "Cikopolis": 1.0,
