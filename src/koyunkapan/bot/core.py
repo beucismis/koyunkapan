@@ -136,52 +136,19 @@ class Bot:
 
             submission.comment_sort = "best"
 
-            for attempt in range(3):
+            loaded_submission = await utils.robust_praw_call(submission.load())
+            if not loaded_submission:
+                continue
+
+            for top_level_comment in submission.comments.list()[: configs.TOP_COMMENT_LIMIT]:
                 try:
-                    await submission.load()
+                    comment_text = top_level_comment.body.splitlines()[0].lower()
 
-                    for top_level_comment in submission.comments.list()[: configs.TOP_COMMENT_LIMIT]:
-                        try:
-                            comment_text = top_level_comment.body.splitlines()[0].lower()
-
-                            if comment_text not in configs.FORBIDDEN_COMMENTS and len(comment_text) > 0:
-                                comments.append(top_level_comment)
-                        except IndexError:
-                            log.warning(f"Comment '{top_level_comment.id}' has an empty body, skipping.")
-                            continue
-                    break
-
-                except (APIException, TooManyRequests) as e:
-                    if (isinstance(e, APIException) and e.error_type == "RATELIMIT") or isinstance(e, TooManyRequests):
-                        message = e.message if isinstance(e, APIException) else str(e)
-                        log.warning(f"Rate limit exceeded on submission {submission.id}: {message}. Retrying...")
-
-                        try:
-                            sleep_time_str = re.search(r"(\d+)\s+(minutes|seconds)", message)
-
-                            if sleep_time_str:
-                                sleep_time = int(sleep_time_str.group(1))
-
-                                if sleep_time_str.group(2) == "minutes":
-                                    sleep_time *= 60
-
-                                log.info(f"Sleeping for {sleep_time} seconds due to rate limit.")
-                                await asyncio.sleep(sleep_time)
-                            else:
-                                await asyncio.sleep(5 * (2**attempt))
-                        except (AttributeError, IndexError):
-                            await asyncio.sleep(5 * (2**attempt))
-                    else:
-                        log.error(f"API Exception on submission {submission.id}: {e}")
-                        break
-                except (RequestException, ServerError) as e:
-                    log.warning(f"Request/Server Exception on submission {submission.id}: {e}. Retrying...")
-                    await asyncio.sleep(5 * (2**attempt))
-                except Exception as e:
-                    log.error(
-                        f"An unexpected error of type {type(e).__name__} occurred on submission {submission.id}: {e}"
-                    )
-                    break
+                    if comment_text not in configs.FORBIDDEN_COMMENTS and len(comment_text) > 0:
+                        comments.append(top_level_comment)
+                except IndexError:
+                    log.warning(f"Comment '{top_level_comment.id}' has an empty body, skipping.")
+                    continue
 
         log.info(f"'{len(comments)}' similar comments collected.")
         return comments
@@ -305,8 +272,9 @@ class Bot:
         return None
 
     @handle_api_exceptions()
-    async def _search_submissions(self, query: str) -> list[Submission]:
+    async def _search_submissions(self, query: str, exclude: list[str] = None) -> list[Submission]:
         submissions = []
+        exclude = exclude or []
 
         async def search_in_subreddit(subreddit_name):
             subreddit = await self.reddit.subreddit(subreddit_name)
@@ -314,7 +282,8 @@ class Bot:
             async for submission in subreddit.search(query, limit=configs.POST_LIMIT):
                 submissions.append(submission)
 
-        await asyncio.gather(*(search_in_subreddit(name) for name in self.subreddit_names))
+        search_pool = [name for name in self.subreddit_names if name not in exclude]
+        await asyncio.gather(*(search_in_subreddit(name) for name in search_pool))
         return submissions
 
     async def _collect_source_comments(
@@ -327,55 +296,24 @@ class Bot:
             if limit_reached:
                 break
 
-            for attempt in range(3):
-                try:
-                    await submission.load()
-                    await submission.comments.replace_more(limit=0)
+            loaded_submission = await utils.robust_praw_call(submission.load())
+            if not loaded_submission:
+                continue
 
-                    for comment in submission.comments.list():
-                        if limit_reached:
-                            break
+            replace_more_result = await utils.robust_praw_call(submission.comments.replace_more(limit=0))
+            if not replace_more_result:
+                continue
 
-                        if comment.id not in processed_comment_ids and comment.body not in configs.FORBIDDEN_COMMENTS:
-                            all_potential_source_comments.append(comment)
-                            processed_comment_ids.add(comment.id)
-
-                            if len(all_potential_source_comments) > 200:
-                                limit_reached = True
+            for comment in submission.comments.list():
+                if limit_reached:
                     break
 
-                except (APIException, TooManyRequests) as e:
-                    if (isinstance(e, APIException) and e.error_type == "RATELIMIT") or isinstance(e, TooManyRequests):
-                        message = e.message if isinstance(e, APIException) else str(e)
-                        log.warning(f"Rate limit exceeded on submission {submission.id}: {message}. Retrying...")
+                if comment.id not in processed_comment_ids and comment.body not in configs.FORBIDDEN_COMMENTS:
+                    all_potential_source_comments.append(comment)
+                    processed_comment_ids.add(comment.id)
 
-                        try:
-                            sleep_time_str = re.search(r"(\d+)\s+(minutes|seconds)", message)
-
-                            if sleep_time_str:
-                                sleep_time = int(sleep_time_str.group(1))
-
-                                if sleep_time_str.group(2) == "minutes":
-                                    sleep_time *= 60
-
-                                log.info(f"Sleeping for {sleep_time} seconds due to rate limit.")
-                                await asyncio.sleep(sleep_time)
-                            else:
-                                await asyncio.sleep(5 * (2**attempt))
-                        except (AttributeError, IndexError):
-                            await asyncio.sleep(5 * (2**attempt))
-                    else:
-                        log.error(f"API Exception on submission {submission.id}: {e}")
-                        break
-                except (RequestException, ServerError) as e:
-                    log.warning(f"Request/Server Exception on submission {submission.id}: {e}. Retrying...")
-                    await asyncio.sleep(5 * (2**attempt))
-                except Exception as e:
-                    log.error(
-                        f"An unexpected error of type {type(e).__name__} occurred on submission {submission.id}: {e}"
-                    )
-                    break
-
+                    if len(all_potential_source_comments) > 200:
+                        limit_reached = True
         return all_potential_source_comments
 
     async def _collect_replies(self, source_comments: list[Comment]) -> list[Comment]:
@@ -385,47 +323,13 @@ class Bot:
             if i > 0 and i % 20 == 0:
                 await asyncio.sleep(10)
 
-            for attempt in range(3):
-                try:
-                    await source_comment.load()
+            loaded_comment = await utils.robust_praw_call(source_comment.load())
+            if not loaded_comment:
+                continue
 
-                    for reply in source_comment.replies:
-                        if reply.body and reply.body.strip() and reply.body not in configs.FORBIDDEN_COMMENTS:
-                            all_replies.append(reply)
-                    break
-
-                except (APIException, TooManyRequests) as e:
-                    if (isinstance(e, APIException) and e.error_type == "RATELIMIT") or isinstance(e, TooManyRequests):
-                        message = e.message if isinstance(e, APIException) else str(e)
-                        log.warning(f"Rate limit exceeded on comment {source_comment.id}: {message}. Retrying...")
-
-                        try:
-                            sleep_time_str = re.search(r"(\d+)\s+(minutes|seconds)", message)
-
-                            if sleep_time_str:
-                                sleep_time = int(sleep_time_str.group(1))
-
-                                if sleep_time_str.group(2) == "minutes":
-                                    sleep_time *= 60
-
-                                log.info(f"Sleeping for {sleep_time} seconds due to rate limit.")
-                                await asyncio.sleep(sleep_time)
-                            else:
-                                await asyncio.sleep(5 * (2**attempt))
-                        except (AttributeError, IndexError):
-                            await asyncio.sleep(5 * (2**attempt))
-                    else:
-                        log.error(f"API Exception on comment {source_comment.id}: {e}")
-                        break
-                except (RequestException, ServerError) as e:
-                    log.warning(f"Request/Server Exception on comment {source_comment.id}: {e}. Retrying...")
-                    await asyncio.sleep(5 * (2**attempt))
-                except Exception as e:
-                    log.error(
-                        f"An unexpected error of type {type(e).__name__} occurred on comment {source_comment.id}: {e}"
-                    )
-                    break
-
+            for reply in source_comment.replies:
+                if reply.body and reply.body.strip() and reply.body not in configs.FORBIDDEN_COMMENTS:
+                    all_replies.append(reply)
         return all_replies
 
     async def _find_first_unused_comment(self, comments: list[Comment]) -> Comment | None:
@@ -452,54 +356,9 @@ class Bot:
 
         return None
 
-    @handle_api_exceptions()
-    async def mark_as_read(self, item: Message) -> None:
-        await item.mark_read()
-
-    async def reply_to_mention(self, mention: Message) -> bool:
-        log.info(f"New reply request received: {mention.id}")
-
-        try:
-            if not mention.parent_id.startswith("t1_"):
-                log.warning(f"Parent of mention {mention.id} is not a comment, skipping.")
-                return False
-
-            original_comment = await self.reddit.comment(mention.parent_id)
-            await original_comment.load()
-            keywords = original_comment.body.split()
-        except (APIException, RequestException, ServerError) as e:
-            log.error(f"Failed to fetch original comment for mention {mention.id}: {e}")
-            return False
-
-        if not keywords:
-            log.warning("Comment to reply to is empty.")
-            return False
-
-        search_queries = utils.get_keyword_combinations(keywords)
-        log.info(f"{len(search_queries)} different search queries created.")
-        submissions = []
-        subreddit_to_search = original_comment.subreddit
-
-        try:
-            for query in search_queries:
-                async for submission in subreddit_to_search.search(query, limit=configs.POST_LIMIT):
-                    submissions.append(submission)
-                if len(submissions) > 200:
-                    break
-        except (APIException, RequestException, ServerError) as e:
-            log.warning(
-                f"Error searching for submissions in {subreddit_to_search.display_name}, trying all subreddits: {e}"
-            )
-
-        if not submissions:
-            log.info("No submissions found in original subreddit, searching all subreddits.")
-            for query in search_queries:
-                subs = await self._search_submissions(query)
-                if subs:
-                    submissions.extend(subs)
-                if len(submissions) > 200:
-                    break
-
+    async def _find_best_comment_with_fallbacks(
+        self, submissions: list[Submission], keywords: list[str], original_comment: Comment
+    ) -> Comment | None:
         all_potential_source_comments = []
         processed_comment_ids = {original_comment.id}
 
@@ -512,7 +371,7 @@ class Bot:
 
         if not all_potential_source_comments:
             log.warning("No potential source comments found.")
-            return False
+            return None
 
         best_comments = self.find_best_comments(all_potential_source_comments, keywords)
         best_comment = await self._find_first_unused_comment(best_comments)
@@ -544,11 +403,97 @@ class Bot:
                     log.info(f"Fallback successful. Picked random comment {best_comment.id}")
                 else:
                     log.warning("Fallback failed: No valid random comments found in original submission.")
-                    return False
+                    return None
 
             except Exception as e:
                 log.error(f"Error during fallback to random comment: {e}")
+                return None
+        return best_comment
+
+    async def _perform_tiered_search(
+        self, search_queries: list[str], original_subreddit: asyncpraw.models.Subreddit
+    ) -> list[Submission]:
+        submissions = []
+        searched_subreddits = []
+
+        try:
+            log.info(f"Tier 1: Searching in original subreddit '{original_subreddit.display_name}'.")
+            for query in search_queries:
+                async for submission in original_subreddit.search(query, limit=configs.POST_LIMIT):
+                    submissions.append(submission)
+                if len(submissions) > configs.MIN_SUBMISSION_THRESHOLD:
+                    break
+            searched_subreddits.append(original_subreddit.display_name)
+        except (APIException, RequestException, ServerError) as e:
+            log.warning(f"Error searching in '{original_subreddit.display_name}': {e}")
+
+        if len(submissions) < configs.MIN_SUBMISSION_THRESHOLD:
+            subreddits_pool = [sub for sub in self.subreddit_names if sub not in searched_subreddits]
+            weights = [configs.SUBREDDIT_WEIGHTS.get(sub, 1.0) for sub in subreddits_pool]
+
+            if subreddits_pool:
+                tier_2_subs = random.choices(
+                    subreddits_pool,
+                    weights=weights,
+                    k=min(configs.TIER_2_SUBREDDIT_COUNT, len(subreddits_pool)),
+                )
+                log.info(
+                    f"Tier 2: Not enough results, expanding search to {len(tier_2_subs)} subreddits: {tier_2_subs}"
+                )
+
+                for sub_name in tier_2_subs:
+                    try:
+                        subreddit = await self.reddit.subreddit(sub_name)
+                        for query in search_queries:
+                            async for submission in subreddit.search(query, limit=configs.POST_LIMIT):
+                                submissions.append(submission)
+                            if len(submissions) > configs.MIN_SUBMISSION_THRESHOLD:
+                                break
+                    except (APIException, RequestException, ServerError) as e:
+                        log.warning(f"Error searching in '{sub_name}': {e}")
+                    searched_subreddits.append(sub_name)
+                    if len(submissions) > configs.MIN_SUBMISSION_THRESHOLD:
+                        break
+
+        if len(submissions) < configs.MIN_SUBMISSION_THRESHOLD:
+            log.info("Tier 3: Still not enough results, expanding to all remaining subreddits.")
+            for query in search_queries:
+                subs = await self._search_submissions(query, exclude=searched_subreddits)
+                if subs:
+                    submissions.extend(subs)
+                if len(submissions) > configs.MIN_SUBMISSION_THRESHOLD:
+                    break
+        return submissions
+
+    @handle_api_exceptions()
+    async def mark_as_read(self, item: Message) -> None:
+        await item.mark_read()
+
+    async def reply_to_mention(self, mention: Message) -> bool:
+        log.info(f"New reply request received: {mention.id}")
+
+        try:
+            if not mention.parent_id.startswith("t1_"):
+                log.warning(f"Parent of mention {mention.id} is not a comment, skipping.")
                 return False
+
+            original_comment = await self.reddit.comment(mention.parent_id)
+            await original_comment.load()
+            keywords = original_comment.body.split()
+        except (APIException, RequestException, ServerError) as e:
+            log.error(f"Failed to fetch original comment for mention {mention.id}: {e}")
+            return False
+
+        if not keywords:
+            log.warning("Comment to reply to is empty.")
+            return False
+
+        search_queries = utils.get_keyword_combinations(keywords)
+        log.info(f"{len(search_queries)} different search queries created.")
+
+        submissions = await self._perform_tiered_search(search_queries, original_comment.subreddit)
+
+        best_comment = await self._find_best_comment_with_fallbacks(submissions, keywords, original_comment)
 
         if best_comment:
             log.info(f"Highest-rated comment found: '{best_comment.id}'")
