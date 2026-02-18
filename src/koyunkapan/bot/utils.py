@@ -73,6 +73,43 @@ def calculate_sentence_difference(s1: str | list[str], s2: str | list[str]) -> f
     return total_result + abs(len(s1) - len(s2))
 
 
+async def robust_praw_call(awaitable, retries=3, initial_sleep=5):
+    last_exception = None
+    for attempt in range(retries):
+        try:
+            return await awaitable
+        except (APIException, TooManyRequests) as e:
+            if (isinstance(e, APIException) and e.error_type == "RATELIMIT") or isinstance(e, TooManyRequests):
+                message = e.message if isinstance(e, APIException) else str(e)
+                log.warning(f"Rate limit exceeded: {message}. Retrying...")
+                try:
+                    sleep_time_str = re.search(r"(\d+)\s+(minutes|seconds)", message)
+                    if sleep_time_str:
+                        sleep_time = int(sleep_time_str.group(1))
+                        if sleep_time_str.group(2) == "minutes":
+                            sleep_time *= 60
+                        log.info(f"Sleeping for {sleep_time} seconds due to rate limit.")
+                        await asyncio.sleep(sleep_time)
+                    else:
+                        await asyncio.sleep(initial_sleep * (2**attempt))
+                except (AttributeError, IndexError):
+                    await asyncio.sleep(initial_sleep * (2**attempt))
+            else:
+                log.error(f"API Exception for {awaitable}: {e}")
+                return None
+        except (RequestException, ServerError) as e:
+            last_exception = e
+            log.warning(f"Request/Server Exception for {awaitable}: {e}. Retrying...")
+            await asyncio.sleep(initial_sleep * (2**attempt))
+        except Exception as e:
+            log.error(f"An unexpected error of type {type(e).__name__} occurred for {awaitable}: {e}")
+            return None
+    log.error(f"PRAW call failed for {awaitable} after {retries} retries.")
+    if last_exception:
+        log.error(f"Last exception: {last_exception}")
+    return None
+
+
 def handle_api_exceptions(retries=3, backoff_factor=1):
     def decorator(func):
         @wraps(func)
